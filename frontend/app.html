@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Notaría 33 de Bogotá · Asistente Notarial</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.26.9/babel.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
@@ -387,14 +387,16 @@
           setSubidaPropietarioNombre(nombreSug);
           setSubidaPropietarioCedula(cedulaSug);
           setSubidaPropietarioCorreo(correoSug);
+          if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+          }
           setModalSubidaAbierto(true);
           setTimeout(() => {
             if (fileInputRef.current) fileInputRef.current.click();
           }, 80);
         };
 
-        const manejarSeleccionArchivoInput = async (e) => {
-          const file = e.target.files && e.target.files[0];
+        const procesarArchivoSeleccionado = (file) => {
           if (!file) return;
           setExtrayendoArchivo(true);
           setArchivoSeleccionadoNombre(file.name);
@@ -426,6 +428,11 @@
             setExtrayendoArchivo(false);
           };
           reader.readAsDataURL(file);
+        };
+
+        const manejarSeleccionArchivoInput = async (e) => {
+          const file = e.target.files && e.target.files[0];
+          procesarArchivoSeleccionado(file);
         };
 
         const confirmarSubidaArchivoReal = async (e) => {
@@ -961,6 +968,15 @@
                   >
                     Configuración
                   </button>
+                  <a
+                    href="/manual"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-[#1C1917] bg-white border border-[#E6E4DD] hover:bg-[#FAF9F6] transition flex items-center gap-1"
+                    title="Abrir Manual de Uso interactivo en HTML"
+                  >
+                    <span>📖 Manual de Uso</span>
+                  </a>
                 </div>
               </div>
             </header>
@@ -999,7 +1015,7 @@
                           : 'Adjuntar Documento Real al Trámite Activo'}
                       </h3>
                       <p className="text-xs text-[#78716C]">
-                        Selecciona el archivo PDF o imagen de tu equipo. El sistema leerá el contenido real del documento para extraer sus datos registrales.
+                        Selecciona o arrastra el archivo PDF o imagen de tu equipo. El sistema leerá el contenido real del documento para extraer sus datos registrales.
                       </p>
                     </div>
                     <button
@@ -1010,13 +1026,27 @@
                     </button>
                   </div>
 
-                  {/* Selector de Archivo desde el computador */}
-                  <div className="p-4 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] flex flex-wrap items-center justify-between gap-3">
+                  {/* Selector de Archivo desde el computador (Soporta Clic o Arrastrar y Soltar / Drag & Drop) */}
+                  <div
+                    onDragOver={(ev) => {
+                      ev.preventDefault();
+                      ev.stopPropagation();
+                    }}
+                    onDrop={(ev) => {
+                      ev.preventDefault();
+                      ev.stopPropagation();
+                      const droppedFile = ev.dataTransfer?.files?.[0];
+                      if (droppedFile) {
+                        procesarArchivoSeleccionado(droppedFile);
+                      }
+                    }}
+                    className="p-4 rounded-xl bg-[#FAF9F6] border-2 border-dashed border-[#D6CFC2] hover:border-[#1C1917] transition flex flex-wrap items-center justify-between gap-3"
+                  >
                     <div className="text-xs">
                       <div className="font-semibold text-[#1C1917]">
                         {archivoSeleccionadoNombre
-                          ? `Archivo cargado: ${archivoSeleccionadoNombre} (${Math.round(Number(archivoSeleccionadoTamano || 0) / 1024)} KB)`
-                          : 'Ningún archivo seleccionado aún'}
+                          ? `✓ Archivo cargado: ${archivoSeleccionadoNombre} (${Math.round(Number(archivoSeleccionadoTamano || 0) / 1024)} KB)`
+                          : '📎 Arrastra aquí tu archivo PDF / Imagen o selecciónalo de tu computador'}
                       </div>
                       <div className="text-[11px] text-[#78716C]">
                         {extrayendoArchivo
@@ -1026,10 +1056,15 @@
                     </div>
                     <button
                       type="button"
-                      onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                      onClick={() => {
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = '';
+                          fileInputRef.current.click();
+                        }
+                      }}
                       className="px-4 py-2 rounded-lg bg-[#1C1917] text-white text-xs font-medium"
                     >
-                      Seleccionar otro archivo de mi PC...
+                      {archivoSeleccionadoNombre ? 'Cambiar archivo de mi PC...' : 'Seleccionar archivo de mi PC...'}
                     </button>
                   </div>
 

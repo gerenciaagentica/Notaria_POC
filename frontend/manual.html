@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Manual de Uso · Asistente Notarial (Notaría 33 de Bogotá)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #F7F6F2;
+        color: #1C1917;
+        margin: 0;
+        -webkit-font-smoothing: antialiased;
+      }
+      .serif-editorial {
+        font-family: 'Playfair Display', Georgia, serif;
+      }
+      .mono-data {
+        font-family: 'JetBrains Mono', monospace;
+      }
+    </style>
+  </head>
+  <body class="bg-[#F7F6F2] text-[#1C1917]">
+    <!-- ENCABEZADO EDITORIAL LOFT -->
+    <header class="bg-[#F7F6F2] border-b border-[#E6E4DD] px-6 py-4 sticky top-0 z-30">
+      <div class="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3.5">
+          <div class="w-9 h-9 rounded-lg bg-[#1C1917] text-white flex items-center justify-center serif-editorial font-semibold text-sm">
+            N33
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="serif-editorial text-lg font-semibold text-[#1C1917]">
+                Manual Oficial de la Herramienta · Asistente Notarial
+              </h1>
+              <span class="px-2 py-0.5 rounded bg-[#F0FDF4] text-[#15803D] border border-[#BBF7D0] text-[10px] font-semibold mono-data">
+                Versión voz-constructora-v5
+              </span>
+            </div>
+            <p class="text-xs text-[#78716C]">
+              Guía operativa paso a paso: Chat Conversacional, Voz Bidireccional, Carga Real de Documentos, Constructoras y Cadena BPMN de 6 Compuertas.
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <a
+            href="/"
+            class="px-4 py-2 rounded-xl bg-[#1C1917] text-white text-xs font-medium hover:bg-[#1C1917]/90 transition"
+          >
+            ← Volver al Asistente Notarial
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-6 py-8 space-y-8">
+      <!-- ÍNDICE RÁPIDO -->
+      <section class="bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#E6E4DD] pb-3">
+          <h2 class="serif-editorial text-lg font-semibold text-[#1C1917]">
+            Índice Rápido de Operación
+          </h2>
+          <span class="text-xs text-[#78716C] mono-data">
+            Motores Activos: Gemini 3.8 Flash · Gemini 3.8 Pro · Google Cloud Text-to-Speech Neural2 (es-US-Neural2-B) · Node.js 22 LTS
+          </span>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <a href="#sec-perfiles" class="p-3 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] hover:border-[#1C1917] transition">
+            <div class="font-semibold text-[#1C1917]">1. Perfiles y Navegación</div>
+            <div class="text-[#78716C] mt-0.5">Abogado Radicador, Verificador, Integral y Cliente.</div>
+          </a>
+          <a href="#sec-voz" class="p-3 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] hover:border-[#1C1917] transition">
+            <div class="font-semibold text-[#1C1917]">2. Chat y Voz Bidireccional</div>
+            <div class="text-[#78716C] mt-0.5">Micrófono (Hablar) y Respuesta Hablada (Google Neural2).</div>
+          </a>
+          <a href="#sec-archivos" class="p-3 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] hover:border-[#1C1917] transition">
+            <div class="font-semibold text-[#1C1917]">3. Adjuntar Archivos Reales</div>
+            <div class="text-[#78716C] mt-0.5">Certificado de Libertad, Cédula, Paz y Salvo y Escritura.</div>
+          </a>
+          <a href="#sec-constructora" class="p-3 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] hover:border-[#1C1917] transition">
+            <div class="font-semibold text-[#1C1917]">4. Flujo de Constructoras</div>
+            <div class="text-[#78716C] mt-0.5">Apartar unidades por chat, cambio de dueño y cruce automático.</div>
+          </a>
+          <a href="#sec-ficha" class="p-3 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] hover:border-[#1C1917] transition">
+            <div class="font-semibold text-[#1C1917]">5. Ficha y Visor Lado a Lado</div>
+            <div class="text-[#78716C] mt-0.5">Escáner original a la izquierda vs. lectura editable a la derecha.</div>
+          </a>
+          <a href="#sec-bpmn" class="p-3 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] hover:border-[#1C1917] transition">
+            <div class="font-semibold text-[#1C1917]">6. Las 6 Compuertas BPMN</div>
+            <div class="text-[#78716C] mt-0.5">Candados estrictos desde documentos hasta impresión notarial.</div>
+          </a>
+        </div>
+      </section>
+
+      <!-- SECCIÓN 1: PERFILES Y NAVEGACIÓN -->
+      <section id="sec-perfiles" class="bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-4">
+        <h2 class="serif-editorial text-xl font-semibold text-[#1C1917] border-b border-[#E6E4DD] pb-2">
+          1. Perfiles de Usuario y Áreas de la Herramienta
+        </h2>
+        <p class="text-xs text-[#78716C] leading-relaxed">
+          En la barra superior derecha puedes alternar en cualquier momento entre los <strong>4 perfiles operativos</strong> de la notaría para comprobar los permisos de cada rol:
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD]">
+            <div class="font-semibold text-[#1C1917]">Abogado Radicador (Carga y Apertura)</div>
+            <p class="text-[#78716C] mt-1">
+              Sube el Certificado de Libertad y Tradición para abrir el trámite, adjunta cédulas y paz y salvos en el chat, pero <strong>no puede dar el Visto Bueno Jurídico final</strong>.
+            </p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD]">
+            <div class="font-semibold text-[#1C1917]">Abogado Verificador (Control de Legalidad)</div>
+            <p class="text-[#78716C] mt-1">
+              Revisa el visor lado a lado, aprueba linderos con sello húmedo, aprueba la vinculación con Constructoras y otorga el <strong>Visto Bueno Jurídico</strong>. Incluye un selector para definir si opera con o sin acceso al chat del Agente.
+            </p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD]">
+            <div class="font-semibold text-[#1C1917]">Abogado Integral (Carga + Verificación)</div>
+            <p class="text-[#78716C] mt-1">
+              Cuenta con permisos completos para cargar documentos, administrar proyectos de constructora, aprobar jurídicamente, enviar el borrador por correo e imprimir.
+            </p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD]">
+            <div class="font-semibold text-[#1C1917]">Cliente / Otorgante (Vendedor o Comprador)</div>
+            <p class="text-[#78716C] mt-1">
+              Consulta el estado de su trámite, adjunta documentos faltantes y registra el <strong>Visto Bueno de Clientes</strong> únicamente cuando el Abogado ya aprobó y le envió el borrador por correo.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECCIÓN 2: CHAT CONVERSACIONAL Y VOZ BIDIRECCIONAL -->
+      <section id="sec-voz" class="bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-4">
+        <h2 class="serif-editorial text-xl font-semibold text-[#1C1917] border-b border-[#E6E4DD] pb-2">
+          2. Chat Conversacional Puro y Voz Bidireccional (Hablar y Escuchar)
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          <div class="p-4 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] space-y-2">
+            <div class="font-semibold text-[#1C1917] flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded bg-[#1C1917] text-white">🎙️ Hablar</span>
+              <span>Entrada por Micrófono (Speech-to-Text en Español)</span>
+            </div>
+            <p class="text-[#78716C] leading-relaxed">
+              Pulsa el botón <strong>🎙️ Hablar</strong> al lado de la barra de mensaje y dicta tu instrucción en voz alta. Al terminar tu frase, el sistema transcribe tu voz y envía automáticamente la instrucción al Agente.
+            </p>
+            <div class="p-2.5 rounded bg-white border border-[#E6E4DD] mono-data text-[11px]">
+              Ejemplo hablado: "Oye dime el trámite de Mauricio Téllez cédula 79.451.200"
+            </div>
+          </div>
+
+          <div class="p-4 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] space-y-2">
+            <div class="font-semibold text-[#1C1917] flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded bg-[#F0FDF4] text-[#15803D] border border-[#BBF7D0]">🔊 Respuesta Hablada</span>
+              <span>Voz de Google Cloud Text-to-Speech Neural2</span>
+            </div>
+            <p class="text-[#78716C] leading-relaxed">
+              Por defecto el Agente responde por escrito, pero puedes activar el interruptor <strong>🔊 Respuesta Hablada: ON</strong> en el encabezado del chat (o decir en el chat <em>"activa la voz"</em> / <em>"solo texto"</em>) o pulsar <strong>🔊 Escuchar</strong> en cualquier mensaje individual.
+            </p>
+            <div class="p-2.5 rounded bg-white border border-[#E6E4DD] mono-data text-[11px]">
+              Voz neuronal oficial: Google Cloud TTS `es-US-Neural2-B` (con respaldo Web Speech API `es-CO`).
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECCIÓN 3: ADJUNTAR ARCHIVOS REALES Y CONTROL ANTI-DUPLICADOS -->
+      <section id="sec-archivos" class="bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-4">
+        <h2 class="serif-editorial text-xl font-semibold text-[#1C1917] border-b border-[#E6E4DD] pb-2">
+          3. Cómo Adjuntar Archivos Reales (PDF / Imagen) y Abrir Trámites
+        </h2>
+        <p class="text-xs text-[#78716C] leading-relaxed">
+          Debajo del cuadro de texto del chat (y también dentro de la Ficha del Trámite) tienes dos botones para cargar archivos reales desde tu computador o arrastrarlos directamente (<strong>Drag &amp; Drop</strong>):
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          <div class="p-4 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] space-y-2">
+            <div class="font-semibold text-[#1C1917]">
+              A. 📄 Subir Certificado de Libertad (Abrir Trámite Nuevo)
+            </div>
+            <ul class="list-disc pl-4 space-y-1 text-[#78716C]">
+              <li>Extrae en el navegador las páginas del PDF con <strong>pdf.js 3.11.174</strong>.</li>
+              <li>Detecta automáticamente <strong>Matrícula Inmobiliaria</strong>, <strong>CHIP</strong>, <strong>Cédula Catastral</strong>, <strong>Dirección</strong> y <strong>Propietario/Cédula</strong>.</li>
+              <li>Si subes un PDF escaneado como imagen sin texto seleccionable, el sistema genera un identificador verificable para que <strong>nunca falle la carga</strong> y puedas revisarlo en el visor.</li>
+              <li><strong>Regla Anti-Duplicados:</strong> Si el CHIP o Matrícula ya tiene un trámite <code>ABIERTO</code>, bloquea el duplicado y te lleva al expediente activo.</li>
+            </ul>
+          </div>
+
+          <div class="p-4 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] space-y-2">
+            <div class="font-semibold text-[#1C1917]">
+              B. 📎 Adjuntar Documento Real al Trámite Activo
+            </div>
+            <ul class="list-disc pl-4 space-y-1 text-[#78716C]">
+              <li>Soporta los 5 tipos documentales notariales:
+                <strong>1) Cédula de Ciudadanía</strong>,
+                <strong>2) Certificado de Libertad y Tradición</strong>,
+                <strong>3) Paz y Salvo de Administración P.H.</strong>,
+                <strong>4) Paz y Salvo de Impuesto Predial / Valorización</strong>, y
+                <strong>5) Escritura Pública Antecedente (Linderos)</strong>.
+              </li>
+              <li>El archivo subido queda incrustado en el visor izquierdo de la Ficha y marca el documento como <code>PENDIENTE_APROBACION_ABOGADO</code>.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECCIÓN 4: FLUJO CONVERSACIONAL DE CONSTRUCTORA -->
+      <section id="sec-constructora" class="bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-4">
+        <h2 class="serif-editorial text-xl font-semibold text-[#1C1917] border-b border-[#E6E4DD] pb-2">
+          4. Flujo Conversacional de Constructoras y Cruce Automático de Documentos
+        </h2>
+        <p class="text-xs text-[#78716C] leading-relaxed">
+          Sin perder el tablero visual de torres y apartamentos en <strong>Configuración → Proyectos de Constructoras</strong>, puedes alimentar los proyectos directamente desde el chat:
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] space-y-1">
+            <div class="font-semibold text-[#1C1917]">1. Apartar un Apartamento sin Documentos</div>
+            <p class="text-[#78716C]">
+              Escribe o dicta: <em>"Apartar apartamento 302 de la Torre A para Juan Pérez cédula 80.555.666"</em>. El apartamento queda en estado <strong>Apartado (0 docs)</strong> esperando sus papeles.
+            </p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] space-y-1">
+            <div class="font-semibold text-[#1C1917]">2. Cambio o Cesión de Dueño en el Conjunto</div>
+            <p class="text-[#78716C]">
+              Escribe o dicta: <em>"El apartamento 302 de la Torre A cambió de dueño a María Gómez cédula 52.999.888"</em>. Actualiza el titular y conserva el historial de dueños anteriores.
+            </p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] space-y-1">
+            <div class="font-semibold text-[#1C1917]">3. Vincular un Trámite que ya está en línea</div>
+            <p class="text-[#78716C]">
+              Escribe: <em>"Este trámite va al apartamento 202 de la Torre A"</em>. El Agente prepara la vinculación y pide confirmación al Abogado.
+            </p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] space-y-1">
+            <div class="font-semibold text-[#1C1917]">4. Detección Automática al Subir Cédula o Certificado</div>
+            <p class="text-[#78716C]">
+              Cuando llega por primera vez la Cédula del comprador (ej. <code>80.555.666</code>) o el Certificado de Libertad del apartamento, el sistema detecta que pertenece a ese apartamento apartado y le pregunta al Abogado: <strong>"✓ Sí, Ingresar Documentación al Apto y Aprobar"</strong>.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECCIÓN 5: FICHA DEL TRÁMITE Y VISOR LADO A LADO -->
+      <section id="sec-ficha" class="bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-4">
+        <h2 class="serif-editorial text-xl font-semibold text-[#1C1917] border-b border-[#E6E4DD] pb-2">
+          5. Ficha Completa del Trámite y Visor Comparativo Lado a Lado
+        </h2>
+        <p class="text-xs text-[#78716C] leading-relaxed">
+          Al pulsar <strong>Ver Trámite</strong> en la barra superior o en las tarjetas del chat, accedes a la hoja notarial completa:
+        </p>
+        <ul class="list-disc pl-5 space-y-1.5 text-xs text-[#78716C]">
+          <li><strong>Bloque 1 (Alarmas Activas):</strong> Muestra documentos faltantes, vencimientos de Paz y Salvo, discrepancias de linderos con sello húmedo o vinculaciones de constructora pendientes.</li>
+          <li><strong>Bloque 2 (Predio y Otorgantes):</strong> Despliega la información completa del Certificado de Libertad y Tradición y la tabla editable de Vendedores y Compradores con su correo electrónico obligatorio.</li>
+          <li><strong>Bloque 3 (Visor Lado a Lado):</strong> A la izquierda ves el PDF o imagen original subida por el usuario (con opción de descarga directa) y a la derecha los campos extraídos por el Agente para que el Abogado los edite o apruebe documento por documento.</li>
+        </ul>
+      </section>
+
+      <!-- SECCIÓN 6: CADENA DE APROBACIÓN BPMN DE 6 COMPUERTAS -->
+      <section id="sec-bpmn" class="bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-4">
+        <h2 class="serif-editorial text-xl font-semibold text-[#1C1917] border-b border-[#E6E4DD] pb-2">
+          6. Cadena de Aprobación BPMN 2.0 (6 Compuertas Estrictas en Orden)
+        </h2>
+        <p class="text-xs text-[#78716C] leading-relaxed">
+          Tanto los botones en pantalla como el servidor validan rigurosamente que ninguna compuerta se salte fuera de orden:
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD]">
+            <div class="mono-data text-[11px] font-semibold text-[#1C1917]">COMPUERTA 1</div>
+            <div class="font-semibold mt-0.5">1. Documentos y Vigencias</div>
+            <p class="text-[#78716C] mt-1">Todos los documentos requeridos cargados, vigentes y aprobados individualmente por el Abogado.</p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD]">
+            <div class="mono-data text-[11px] font-semibold text-[#1C1917]">COMPUERTA 2</div>
+            <div class="font-semibold mt-0.5">2. Linderos y Sellos</div>
+            <p class="text-[#78716C] mt-1">Confirmación humana de los linderos donde el sello húmedo de la escritura anterior generaba duda.</p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD]">
+            <div class="mono-data text-[11px] font-semibold text-[#1C1917]">COMPUERTA 3</div>
+            <div class="font-semibold mt-0.5">3. Visto Bueno Jurídico</div>
+            <p class="text-[#78716C] mt-1">Exclusivo para Abogado Verificador o Integral, solo cuando las compuertas 1 y 2 están completas.</p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD]">
+            <div class="mono-data text-[11px] font-semibold text-[#1C1917]">COMPUERTA 4</div>
+            <div class="font-semibold mt-0.5">4. Envío de Borrador por Correo</div>
+            <p class="text-[#78716C] mt-1">Exige correo electrónico válido en todos los Vendedores y Compradores antes de habilitar la aprobación del cliente.</p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD]">
+            <div class="mono-data text-[11px] font-semibold text-[#1C1917]">COMPUERTA 5</div>
+            <div class="font-semibold mt-0.5">5. Visto Bueno de Clientes</div>
+            <p class="text-[#78716C] mt-1">Bloqueado hasta que exista Visto Bueno Jurídico del Abogado y envío formal del borrador por correo.</p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD]">
+            <div class="mono-data text-[11px] font-semibold text-[#1C1917]">COMPUERTA 6</div>
+            <div class="font-semibold mt-0.5">6. Impresión y Cierre</div>
+            <p class="text-[#78716C] mt-1">Asigna número de escritura y folios de papel de seguridad notarial, pasando el trámite a estado <code>CERRADO</code>.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

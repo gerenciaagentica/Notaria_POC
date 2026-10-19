@@ -6,8 +6,13 @@ const path = require('path');
 const url = require('url');
 
 const PORT = process.env.PORT || 4000;
+const APP_VERSION = process.env.APP_VERSION || 'voz-constructora-v5';
+const PRIMARY_VISION_MODEL = process.env.PRIMARY_VISION_MODEL || 'gemini-3.8-flash';
+const SECONDARY_VISION_MODEL = process.env.SECONDARY_VISION_MODEL || 'gemini-3.8-pro';
+const TTS_VOICE_MODEL = process.env.TTS_VOICE_MODEL || 'es-US-Neural2-B';
 const STORE_PATH = path.join(__dirname, '..', 'database', 'local_store.json');
 const FRONTEND_PATH = path.join(__dirname, '..', '..', 'frontend', 'app.html');
+const MANUAL_PATH = path.join(__dirname, '..', '..', 'frontend', 'manual.html');
 
 const initialStore = {
   usuarios_temporales: [
@@ -1584,14 +1589,16 @@ function enrichStoreForApi(store) {
 
 function parseJsonBody(req) {
   return new Promise((resolve) => {
-    let body = '';
+    const chunks = [];
     req.on('data', (chunk) => {
-      body += chunk.toString();
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     });
     req.on('end', () => {
       try {
+        const body = Buffer.concat(chunks).toString('utf8');
         resolve(body ? JSON.parse(body) : {});
       } catch (e) {
+        console.error('[parseJsonBody] Error parseando JSON:', e.message);
         resolve({});
       }
     });
@@ -1621,10 +1628,27 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
+  if (req.method === 'GET' && (pathname === '/manual' || pathname === '/manual.html')) {
+    if (fs.existsSync(MANUAL_PATH)) {
+      const htmlManual = fs.readFileSync(MANUAL_PATH, 'utf8');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(htmlManual);
+    }
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('Manual no encontrado.');
+  }
+
   if (req.method === 'GET' && pathname === '/api/health') {
     return sendJson(res, 200, {
       ok: true,
       status: 'OPERATIVO',
+      version: APP_VERSION,
+      node_version: process.version,
+      ia_modelos: {
+        vision_primario: PRIMARY_VISION_MODEL,
+        vision_consenso: SECONDARY_VISION_MODEL,
+        voz_tts: TTS_VOICE_MODEL
+      },
       plataforma: 'Asistente Notarial · Notaría 33 de Bogotá'
     });
   }
@@ -1635,6 +1659,12 @@ const server = http.createServer(async (req, res) => {
     const usuarioActivo = getUsuarioActivo(store);
     return sendJson(res, 200, {
       ...store,
+      version: APP_VERSION,
+      ia_modelos: {
+        vision_primario: PRIMARY_VISION_MODEL,
+        vision_consenso: SECONDARY_VISION_MODEL,
+        voz_tts: TTS_VOICE_MODEL
+      },
       caso_activo: caso,
       usuario_activo: usuarioActivo,
       estado_bpmn: calcularEstadoBpmn(caso),
@@ -2005,7 +2035,14 @@ const server = http.createServer(async (req, res) => {
 
     const extraido = extraerDatosDeTextoDocumento(body.texto_extraido || '', body.archivo_nombre || '');
     const rawTipo = (body.codigo_tipo || body.tipo_documento || 'CERTIFICADO_TRADICION').toUpperCase();
-    const tipoDoc = rawTipo === 'CEDULA' ? 'CEDULA_CIUDADANIA' : rawTipo;
+    const tipoDoc =
+      rawTipo === 'CEDULA'
+        ? 'CEDULA_CIUDADANIA'
+        : rawTipo === 'ESCRITURA_ANTECEDENTE'
+        ? 'ESCRITURA_ANTERIOR'
+        : rawTipo === 'PAZ_Y_SALVO_PREDIAL'
+        ? 'RECIBOS_FISCALES'
+        : rawTipo;
     const nombrePropBody = body.nombre_propietario || body.propietario_nombre || '';
     const cedulaBody = body.cedula || body.propietario_cedula || '';
     const mimeBody = body.tipo_mime || body.archivo_mime || 'application/pdf';
@@ -2026,24 +2063,17 @@ const server = http.createServer(async (req, res) => {
       body.modo === 'ABRIR_TRAMITE_NUEVO' ||
       (tipoDoc === 'CERTIFICADO_TRADICION' && body.abrir_tramite_nuevo)
     ) {
-      const chipReal = (body.chip || extraido.chip || '').toUpperCase().trim();
-      const matriculaReal = (body.matricula || extraido.matricula || '').toUpperCase().trim();
-      const cedulaReal = (cedulaBody || extraido.cedula_detectada || '').trim();
-      const nombrePropReal = (nombrePropBody || extraido.nombre_detectado || '').toUpperCase().trim();
-      const apellidoReal = (body.apellido || (nombrePropReal ? nombrePropReal.split(/\s+/)[0] : '') || '').toUpperCase().trim();
-
-      if (!chipReal && !matriculaReal) {
-        return sendJson(res, 400, {
-          ok: false,
-          error: 'Por favor confirma el CHIP o la Matrícula Inmobiliaria del Certificado de Libertad y Tradición que estás adjuntando.'
-        });
-      }
-      if (!nombrePropReal || !cedulaReal) {
-        return sendJson(res, 400, {
-          ok: false,
-          error: 'Por favor confirma el Nombre/Apellido y la Cédula del primer propietario que aparece en el Certificado de Libertad y Tradición.'
-        });
-      }
+      const sufijoAuto = String(Date.now()).slice(-4);
+      const chipReal = (body.chip || extraido.chip || `AAA${sufijoAuto}SCAN`).toUpperCase().trim();
+      const matriculaReal = (body.matricula || extraido.matricula || `50N-${sufijoAuto}`).toUpperCase().trim();
+      const cedulaReal = (cedulaBody || extraido.cedula_detectada || 'POR_VERIFICAR_EN_VISOR').trim();
+      const nombreLimpioArchivo = String(body.archivo_nombre || 'TITULAR POR VERIFICAR')
+        .replace(/\.[^.]+$/, '')
+        .replace(/[_\-]+/g, ' ')
+        .toUpperCase()
+        .trim();
+      const nombrePropReal = (nombrePropBody || extraido.nombre_detectado || nombreLimpioArchivo || 'TITULAR POR VERIFICAR').toUpperCase().trim();
+      const apellidoReal = (body.apellido || (nombrePropReal ? nombrePropReal.split(/\s+/)[0] : 'TITULAR')).toUpperCase().trim();
 
       const llavePredio = chipReal || matriculaReal;
       const existenteAbierto = store.casos.find(
@@ -2213,8 +2243,11 @@ const server = http.createServer(async (req, res) => {
     if (!docTarget && tipoDoc === 'PAZ_Y_SALVO_ADMIN') {
       docTarget = caso.documentos.find((d) => d.codigo_tipo === 'PAZ_Y_SALVO_ADMIN');
     }
+    if (!docTarget && tipoDoc === 'RECIBOS_FISCALES') {
+      docTarget = caso.documentos.find((d) => d.codigo_tipo === 'RECIBOS_FISCALES' || d.codigo_tipo === 'PAZ_Y_SALVO_PREDIAL');
+    }
     if (!docTarget && tipoDoc === 'ESCRITURA_ANTERIOR') {
-      docTarget = caso.documentos.find((d) => d.codigo_tipo === 'ESCRITURA_ANTERIOR');
+      docTarget = caso.documentos.find((d) => d.codigo_tipo === 'ESCRITURA_ANTERIOR' || d.codigo_tipo === 'ESCRITURA_ANTECEDENTE');
     }
 
     const camposNuevos = [];
@@ -2250,19 +2283,20 @@ const server = http.createServer(async (req, res) => {
         { clave: 'Número de Cédula', valor: cc, dudoso: false },
         { clave: 'Rol en el Trámite', valor: body.rol_parte || 'OTORGANTE', dudoso: false }
       );
-    } else if (tipoDoc === 'PAZ_Y_SALVO_ADMIN') {
+    } else if (tipoDoc === 'PAZ_Y_SALVO_ADMIN' || tipoDoc === 'RECIBOS_FISCALES') {
       const fExp = body.fecha_expedicion || hoyIso;
       const dObj = new Date(fExp + 'T12:00:00');
       const ultDia = new Date(dObj.getFullYear(), dObj.getMonth() + 1, 0, 12, 0, 0).toISOString().split('T')[0];
       camposNuevos.push(
         { clave: 'Archivo Subido', valor: body.archivo_nombre || 'Paz_y_Salvo.pdf', dudoso: false },
+        { clave: 'Tipo de Paz y Salvo', valor: tipoDoc === 'RECIBOS_FISCALES' ? 'Impuesto Predial / Valorización (IDU)' : 'Paz y Salvo de Administración P.H.', dudoso: false },
         { clave: 'Fecha de Expedición', valor: fExp, dudoso: false },
         { clave: 'Vencimiento (Último día del mes)', valor: ultDia, dudoso: false }
       );
     } else {
       camposNuevos.push(
-        { clave: 'Archivo Subido', valor: body.archivo_nombre || 'Documento_Anexo.pdf', dudoso: false },
-        { clave: 'Observación / Extracto', valor: (body.texto_extraido || 'Archivo adjuntado por el usuario para revisión del abogado.').slice(0, 220), dudoso: false }
+        { clave: 'Archivo Subido', valor: body.archivo_nombre || 'Escritura_Anterior.pdf', dudoso: false },
+        { clave: 'Observación / Extracto', valor: (body.texto_extraido || 'Archivo adjuntado por el usuario para revisión del abogado en el visor.').slice(0, 220), dudoso: false }
       );
     }
 
@@ -2282,7 +2316,7 @@ const server = http.createServer(async (req, res) => {
           ? 'CERTIFICADO_SNR'
           : tipoDoc === 'CEDULA_CIUDADANIA'
           ? 'CEDULA_COLOMBIA'
-          : tipoDoc === 'PAZ_Y_SALVO_ADMIN'
+          : tipoDoc === 'PAZ_Y_SALVO_ADMIN' || tipoDoc === 'RECIBOS_FISCALES'
           ? 'PAZ_Y_SALVO'
           : 'MINUTA_SELLOS_LINDEROS';
       docTarget.mensaje_alerta = `Archivo real "${body.archivo_nombre || docTarget.archivo}" cargado por ${usuarioActivo.nombre}. Pendiente que el Abogado Verificador lo revise en el visor y lo apruebe.`;
@@ -2291,7 +2325,11 @@ const server = http.createServer(async (req, res) => {
       const nuevoDoc = {
         id: 'doc-' + Date.now(),
         codigo_tipo: tipoDoc,
-        nombre: body.titulo_documento || `${tipoDoc} · ${body.archivo_nombre || 'Adjunto'}`,
+        nombre:
+          body.titulo_documento ||
+          (tipoDoc === 'RECIBOS_FISCALES'
+            ? `Paz y Salvo Predial y Valorización · ${body.archivo_nombre || 'Adjunto'}`
+            : `${tipoDoc} · ${body.archivo_nombre || 'Adjunto'}`),
         archivo: body.archivo_nombre || 'documento_adjunto.pdf',
         archivo_data_url: body.archivo_data_url || '',
         tipo_mime: mimeBody,
@@ -2308,7 +2346,7 @@ const server = http.createServer(async (req, res) => {
             ? 'CERTIFICADO_SNR'
             : tipoDoc === 'CEDULA_CIUDADANIA'
             ? 'CEDULA_COLOMBIA'
-            : tipoDoc === 'PAZ_Y_SALVO_ADMIN'
+            : tipoDoc === 'PAZ_Y_SALVO_ADMIN' || tipoDoc === 'RECIBOS_FISCALES'
             ? 'PAZ_Y_SALVO'
             : 'MINUTA_SELLOS_LINDEROS',
         campos_leidos_agente: camposNuevos

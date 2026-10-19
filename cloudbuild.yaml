@@ -27,10 +27,10 @@ steps:
       - '--port=8080'
       - '--memory=1Gi'
       - '--cpu=1'
-      - '--set-env-vars=NODE_ENV=production,GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=us-central1,PRIMARY_VISION_MODEL=gemini-3.8-flash,SECONDARY_VISION_MODEL=gemini-3.1-pro,GCS_BUCKET=notaria-expedientes-$PROJECT_ID'
+      - '--set-env-vars=NODE_ENV=production,APP_VERSION=$_SHORT_SHA,GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=us-central1,PRIMARY_VISION_MODEL=gemini-3.8-flash,SECONDARY_VISION_MODEL=gemini-3.8-pro,TTS_VOICE_MODEL=es-US-Neural2-B,GCS_BUCKET=notaria-expedientes-$PROJECT_ID'
 
 substitutions:
-  _SHORT_SHA: 'v1'
+  _SHORT_SHA: 'voz-constructora-v5'
 
 options:
   logging: CLOUD_LOGGING_ONLY
