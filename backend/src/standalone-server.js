@@ -1,4 +1,6 @@
 const http = require('http');
+const https = require('https');
+const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
@@ -1715,6 +1717,283 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // ENDPOINT DE VOZ DE GOOGLE CLOUD TEXT-TO-SPEECH (Voces Neuronales en Español `es-US-Neural2-B` / `es-US-Neural2-A`)
+  if (req.method === 'POST' && pathname === '/api/voz/tts') {
+    const body = await parseJsonBody(req);
+    const textoLimpio = String(body.texto || '')
+      .replace(/[✓⚠️✉️📎📄🎙️🔊🔍•]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 1200);
+
+    if (!textoLimpio) {
+      return sendJson(res, 400, { ok: false, error: 'Texto vacío para sintetizar voz.' });
+    }
+
+    const obtenerTokenGcp = () =>
+      new Promise((resolve) => {
+        const metaReq = http.request(
+          {
+            hostname: 'metadata.google.internal',
+            path: '/computeMetadata/v1/instance/service-accounts/default/token',
+            method: 'GET',
+            headers: { 'Metadata-Flavor': 'Google' },
+            timeout: 1200
+          },
+          (metaRes) => {
+            let raw = '';
+            metaRes.on('data', (chunk) => (raw += chunk));
+            metaRes.on('end', () => {
+              try {
+                const parsed = JSON.parse(raw);
+                if (parsed && parsed.access_token) return resolve(parsed.access_token);
+              } catch (e) {}
+              resolve(null);
+            });
+          }
+        );
+        metaReq.on('error', () => resolve(null));
+        metaReq.on('timeout', () => {
+          metaReq.destroy();
+          resolve(null);
+        });
+        metaReq.end();
+      });
+
+    let accessToken = await obtenerTokenGcp();
+    if (!accessToken) {
+      try {
+        accessToken = execSync('gcloud auth print-access-token', { encoding: 'utf8', timeout: 3500 }).trim();
+      } catch (e) {
+        accessToken = null;
+      }
+    }
+
+    if (!accessToken) {
+      return sendJson(res, 200, { ok: false, fallback_browser_tts: true });
+    }
+
+    const payloadTts = JSON.stringify({
+      input: { text: textoLimpio },
+      voice: {
+        languageCode: 'es-US',
+        name: body.voz === 'FEMENINA' ? 'es-US-Neural2-A' : 'es-US-Neural2-B'
+      },
+      audioConfig: {
+        audioEncoding: 'MP3',
+        speakingRate: 1.03
+      }
+    });
+
+    const audioBase64 = await new Promise((resolve) => {
+      const ttsReq = https.request(
+        {
+          hostname: 'texttospeech.googleapis.com',
+          path: '/v1/text:synthesize',
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'x-goog-user-project': 'agente-deviajecon',
+            'Content-Length': Buffer.byteLength(payloadTts)
+          },
+          timeout: 6000
+        },
+        (ttsRes) => {
+          let raw = '';
+          ttsRes.on('data', (c) => (raw += c));
+          ttsRes.on('end', () => {
+            try {
+              const parsed = JSON.parse(raw);
+              if (parsed && parsed.audioContent) return resolve(parsed.audioContent);
+            } catch (e) {}
+            resolve(null);
+          });
+        }
+      );
+      ttsReq.on('error', () => resolve(null));
+      ttsReq.on('timeout', () => {
+        ttsReq.destroy();
+        resolve(null);
+      });
+      ttsReq.write(payloadTts);
+      ttsReq.end();
+    });
+
+    if (audioBase64) {
+      return sendJson(res, 200, {
+        ok: true,
+        motor: 'Google Cloud Text-to-Speech Neural2',
+        audio_data_url: `data:audio/mp3;base64,${audioBase64}`
+      });
+    }
+    return sendJson(res, 200, { ok: false, fallback_browser_tts: true });
+  }
+
+  // FUNCIÓN AUXILIAR: Cruzar datos de un documento leído (Cédula, Nombre, Apartamento o Matrícula) contra las unidades apartadas de Constructoras
+  function buscarCoincidenciaUnidadConstructora(store, datosBusqueda) {
+    const cedLimpia = String(datosBusqueda.cedula || '').replace(/\D/g, '');
+    const nombreUpper = String(datosBusqueda.nombre || '').toUpperCase().trim();
+    const textoUpper = String(datosBusqueda.texto || '').toUpperCase();
+    const dirUpper = String(datosBusqueda.direccion || '').toUpperCase();
+    const matUpper = String(datosBusqueda.matricula || '').toUpperCase().trim();
+
+    for (const proy of store.proyectos_constructoras || []) {
+      for (const u of proy.unidades || []) {
+        const uCedLimpia = String(u.comprador_cc || '').replace(/\D/g, '');
+        const uNomUpper = String(u.comprador_nombre || '').toUpperCase().trim();
+        const matchCedula = cedLimpia.length >= 6 && uCedLimpia === cedLimpia;
+        const matchNombre =
+          nombreUpper.length >= 5 &&
+          uNomUpper.length >= 5 &&
+          (uNomUpper.includes(nombreUpper) || nombreUpper.includes(uNomUpper));
+        const matchMatricula = matUpper.length >= 5 && u.matricula && String(u.matricula).toUpperCase() === matUpper;
+        const matchAptoEnTexto =
+          (textoUpper.includes(`APTO ${u.apartamento}`) ||
+            textoUpper.includes(`APARTAMENTO ${u.apartamento}`) ||
+            dirUpper.includes(`APTO ${u.apartamento}`) ||
+            dirUpper.includes(`APARTAMENTO ${u.apartamento}`)) &&
+          (textoUpper.includes(proy.nombre_proyecto.split(' ')[0].toUpperCase()) ||
+            dirUpper.includes(proy.nombre_proyecto.split(' ')[0].toUpperCase()) ||
+            matchCedula ||
+            matchNombre);
+
+        if (matchCedula || matchNombre || matchMatricula || matchAptoEnTexto) {
+          return {
+            proyecto: proy,
+            unidad: u,
+            motivo_coincidencia: matchCedula
+              ? `Cédula ${u.comprador_cc} coincide con el comprador apartado de la unidad ${u.unidad_id}`
+              : matchNombre
+              ? `Nombre "${u.comprador_nombre}" coincide con el comprador apartado de la unidad ${u.unidad_id}`
+              : `Identificación del Apartamento ${u.apartamento} (${u.bloque}) coincide con el proyecto ${proy.nombre_proyecto}`
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  // ENDPOINT PARA QUE EL ABOGADO APRUEBE O CONFIRME EL INGRESO DE DOCUMENTACIÓN Y VINCULACIÓN DE UN TRÁMITE A UN APARTAMENTO DE CONSTRUCTORA
+  if (req.method === 'POST' && pathname === '/api/constructoras/aprobar-vinculacion') {
+    const body = await parseJsonBody(req);
+    const store = loadStore();
+    const caso = getCasoActivo(store);
+    const usuarioActivo = getUsuarioActivo(store);
+    const ahoraHora = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+
+    const infoPend = caso.constructora_sugerida || caso.constructora_info || {};
+    const proyId = body.proyecto_id || infoPend.proyecto_id || store.proyectos_constructoras[0]?.proyecto_id;
+    const proy = store.proyectos_constructoras.find((p) => p.proyecto_id === proyId) || store.proyectos_constructoras[0];
+    const torre = body.torre_bloque || infoPend.torre_bloque || 'Torre A';
+    const apto = String(body.apartamento || infoPend.apartamento || '401').replace(/^Apartamento\s+/i, '').trim();
+    const unidadId = `${torre.replace('Torre ', '').trim()}-${apto}`;
+    const unidad = proy.unidades.find((u) => u.unidad_id === unidadId || (u.bloque === torre && u.apartamento === apto));
+
+    if (body.rechazar) {
+      caso.constructora_sugerida = null;
+      caso.pertenece_constructora = false;
+      saveStore(store);
+      return sendJson(res, 200, {
+        ok: true,
+        caso_activo: caso,
+        proyectos_constructoras: store.proyectos_constructoras,
+        estado_bpmn: calcularEstadoBpmn(caso)
+      });
+    }
+
+    caso.pertenece_constructora = true;
+    caso.constructora_sugerida = null;
+    if (!caso.subcategorias_activas.includes('SUB-PROYECTO-CONSTRUCTORA')) {
+      caso.subcategorias_activas.push('SUB-PROYECTO-CONSTRUCTORA');
+    }
+
+    if (unidad) {
+      unidad.estado_dinamico = 'En revisión';
+      unidad.documentos_recibidos = caso.documentos.filter((d) => d.estado !== 'FALTA_DOCUMENTO').length;
+      unidad.codigo_tramite_vinculado = caso.codigo_tramite;
+      if (unidad.comprador_nombre && unidad.comprador_cc) {
+        const yaEsta = caso.partes.some(
+          (p) => p.numero_documento.replace(/\D/g, '') === String(unidad.comprador_cc).replace(/\D/g, '')
+        );
+        if (!yaEsta) {
+          caso.partes.push({
+            id: 'p-comp-' + Date.now(),
+            rol: 'COMPRADOR',
+            nombres_completos: unidad.comprador_nombre.toUpperCase(),
+            numero_documento: unidad.comprador_cc,
+            lugar_expedicion: 'Bogotá D.C.',
+            estado_civil: 'Soltero(a)',
+            genero: 'M',
+            porcentaje: 100,
+            correo_electronico: unidad.comprador_correo || 'comprador@correo.co',
+            origen_inferencia: `Comprador apartado en ${proy.nombre_proyecto} (${torre} · Apto ${apto}).`,
+            cedula_cargada: true,
+            aprobado_verificador: true,
+            aprobado_por: usuarioActivo.nombre,
+            borrador_enviado: false,
+            visto_bueno_cliente: false
+          });
+        }
+      }
+    }
+
+    caso.constructora_info = {
+      proyecto_id: proy.proyecto_id,
+      nombre_proyecto: proy.nombre_proyecto,
+      constructora: proy.constructora,
+      torre_bloque: torre,
+      apartamento: apto,
+      unidad_id: unidadId,
+      comprador_apartado: unidad?.comprador_nombre || '',
+      comprador_cc: unidad?.comprador_cc || '',
+      historial_duenos: unidad?.historial_duenos || [],
+      estado_unidad: unidad?.estado_dinamico || 'En revisión',
+      aprobado_abogado: true,
+      aprobado_por: usuarioActivo.nombre,
+      fecha_aprobacion: new Date().toLocaleString('es-CO')
+    };
+    caso.constructora_vinculada = {
+      es_constructora: true,
+      ...caso.constructora_info,
+      torre: torre
+    };
+
+    caso.bitacora.push({
+      id: 'ev-const-aprob-' + Date.now(),
+      fecha: new Date().toLocaleString('es-CO'),
+      actor: `${usuarioActivo.nombre} (${usuarioActivo.cargo})`,
+      etapa: 'Aprobación de Ingreso a Apartamento de Constructora',
+      detalle: `Aprobó ingresar la documentación del trámite ${caso.codigo_tramite} al Apartamento ${apto} (${torre}) del proyecto ${proy.nombre_proyecto}.`
+    });
+
+    caso.mensajes_chat.push({
+      id: 'm-ag-' + Date.now(),
+      emisor: 'ASISTENTE',
+      autor: 'Asistente Notarial',
+      hora: ahoraHora,
+      texto: `✓ ${usuarioActivo.nombre} aprobó ingresar esta documentación al Apartamento ${apto} (${torre}) del proyecto "${proy.nombre_proyecto}". Ya heredé la escritura matriz del reglamento P.H. y actualicé el estado del apartamento a "En revisión".`,
+      hallazgos: [
+        `Proyecto: ${proy.nombre_proyecto} · Unidad ${unidadId}`,
+        `Titular / Comprador del Apartamento: ${unidad?.comprador_nombre || 'Registrado'} (C.C. ${unidad?.comprador_cc || ''})`,
+        `Aprobado por Abogado: ${usuarioActivo.nombre}`
+      ],
+      alertas_rojas: [],
+      preguntas_pendientes: [],
+      acciones_sugeridas: [{ tipo: 'VER_FICHA_TRAMITE', etiqueta: 'Ver Ficha del Trámite Vinculado' }]
+    });
+
+    saveStore(store);
+    return sendJson(res, 200, {
+      ok: true,
+      constructora_info: caso.constructora_info,
+      caso_activo: caso,
+      proyectos_constructoras: store.proyectos_constructoras,
+      estado_bpmn: calcularEstadoBpmn(caso),
+      minuta_generada_actual: generarTextoMinuta(caso)
+    });
+  }
+
   // ENDPOINT PARA SUBIR UN ARCHIVO REAL DESDE EL COMPUTADOR DEL USUARIO (Certificado de Libertad y Tradición, Cédula, Paz y Salvo, Escritura Anterior)
   if (req.method === 'POST' && pathname === '/api/documento/subir') {
     const body = await parseJsonBody(req);
@@ -1730,6 +2009,15 @@ const server = http.createServer(async (req, res) => {
     const nombrePropBody = body.nombre_propietario || body.propietario_nombre || '';
     const cedulaBody = body.cedula || body.propietario_cedula || '';
     const mimeBody = body.tipo_mime || body.archivo_mime || 'application/pdf';
+
+    // Cruzar automáticamente los datos leídos del documento contra los apartamentos apartados en Constructoras
+    const matchConstructora = buscarCoincidenciaUnidadConstructora(store, {
+      cedula: cedulaBody || extraido.cedula_detectada,
+      nombre: nombrePropBody || extraido.nombre_detectado,
+      matricula: body.matricula || extraido.matricula,
+      direccion: body.direccion || extraido.direccion,
+      texto: body.texto_extraido || ''
+    });
 
     // Si el usuario está subiendo un Certificado de Libertad y Tradición para ABRIR un trámite nuevo
     if (
@@ -1819,12 +2107,36 @@ const server = http.createServer(async (req, res) => {
         store
       );
 
+      if (matchConstructora) {
+        nuevoCaso.constructora_sugerida = {
+          proyecto_id: matchConstructora.proyecto.proyecto_id,
+          nombre_proyecto: matchConstructora.proyecto.nombre_proyecto,
+          constructora: matchConstructora.proyecto.constructora,
+          torre_bloque: matchConstructora.unidad.bloque,
+          apartamento: matchConstructora.unidad.apartamento,
+          unidad_id: matchConstructora.unidad.unidad_id,
+          comprador_apartado: matchConstructora.unidad.comprador_nombre,
+          comprador_cc: matchConstructora.unidad.comprador_cc,
+          motivo: matchConstructora.motivo_coincidencia,
+          aprobado_abogado: false
+        };
+        nuevoCaso.mensajes_chat[0].texto += ` 🔍 Además, al leer este documento detecté que coincide con el Apartamento ${matchConstructora.unidad.apartamento} (${matchConstructora.unidad.bloque}) apartado en el proyecto "${matchConstructora.proyecto.nombre_proyecto}" a nombre de ${matchConstructora.unidad.comprador_nombre} (C.C. ${matchConstructora.unidad.comprador_cc}). ¿Autorizas ingresar esta documentación a ese apartamento?`;
+        nuevoCaso.mensajes_chat[0].hallazgos.push(
+          `🔍 Coincidencia Constructora detectada: ${matchConstructora.proyecto.nombre_proyecto} · ${matchConstructora.unidad.bloque} Apto ${matchConstructora.unidad.apartamento} (${matchConstructora.motivo_coincidencia})`
+        );
+        nuevoCaso.mensajes_chat[0].acciones_sugeridas.unshift({
+          tipo: 'APROBAR_VINCULACION_CONSTRUCTORA',
+          etiqueta: `✓ Sí, Ingresar Documentación al Apto ${matchConstructora.unidad.apartamento} (${matchConstructora.unidad.bloque}) y Aprobar`
+        });
+      }
+
       store.casos.unshift(nuevoCaso);
       store.caso_activo_id = nuevoCaso.id;
       saveStore(store);
       return sendJson(res, 200, {
         ok: true,
         duplicado_bloqueado: false,
+        coincidencia_constructora: matchConstructora ? nuevoCaso.constructora_sugerida : null,
         nuevo_caso: nuevoCaso,
         caso_activo: nuevoCaso,
         casos: store.casos,
@@ -2012,20 +2324,50 @@ const server = http.createServer(async (req, res) => {
     caso.aprobaciones.visto_bueno_compradores = false;
 
     const estadoBpmn = calcularEstadoBpmn(caso);
+    const accionesMsg = [
+      { tipo: 'VER_FICHA_TRAMITE', etiqueta: 'Ver Archivo Subido en la Ficha del Trámite' },
+      estadoBpmn.siguiente_accion
+    ];
+    let textoRespuestaSubida = `📎 He recibido y procesado tu archivo real "${body.archivo_nombre}" en el trámite ${caso.codigo_tramite}. Ya está disponible en el visor de la Ficha del Trámite para revisión y aprobación del Abogado Verificador.`;
+    const hallazgosSubida = camposNuevos.map((c) => `${c.clave}: ${c.valor}`);
+
+    // Si al leer esta Cédula o Certificado detectamos que pertenece a un apartamento apartado en Constructora, preguntarle al Abogado
+    if (matchConstructora && !caso.pertenece_constructora) {
+      caso.constructora_sugerida = {
+        proyecto_id: matchConstructora.proyecto.proyecto_id,
+        nombre_proyecto: matchConstructora.proyecto.nombre_proyecto,
+        constructora: matchConstructora.proyecto.constructora,
+        torre_bloque: matchConstructora.unidad.bloque,
+        apartamento: matchConstructora.unidad.apartamento,
+        unidad_id: matchConstructora.unidad.unidad_id,
+        comprador_apartado: matchConstructora.unidad.comprador_nombre,
+        comprador_cc: matchConstructora.unidad.comprador_cc,
+        motivo: matchConstructora.motivo_coincidencia,
+        aprobado_abogado: false
+      };
+      textoRespuestaSubida += ` 🔍 Al leer este documento detecté que corresponde al Apartamento ${matchConstructora.unidad.apartamento} (${matchConstructora.unidad.bloque}) apartado en el proyecto "${matchConstructora.proyecto.nombre_proyecto}" a nombre de ${matchConstructora.unidad.comprador_nombre} (C.C. ${matchConstructora.unidad.comprador_cc}). ¿Autorizas ingresar esta documentación al Apartamento ${matchConstructora.unidad.apartamento}?`;
+      hallazgosSubida.push(
+        `🔍 Coincidencia con Apartamento Apartado: ${matchConstructora.proyecto.nombre_proyecto} · ${matchConstructora.unidad.bloque} · Apartamento ${matchConstructora.unidad.apartamento} (${matchConstructora.motivo_coincidencia})`
+      );
+      accionesMsg.unshift({
+        tipo: 'APROBAR_VINCULACION_CONSTRUCTORA',
+        etiqueta: `✓ Sí, Ingresar Documentación al Apto ${matchConstructora.unidad.apartamento} (${matchConstructora.unidad.bloque}) y Aprobar`
+      });
+    }
+
     caso.mensajes_chat.push({
       id: 'm-up-' + Date.now(),
       emisor: 'ASISTENTE',
       autor: 'Asistente Notarial',
       hora: ahoraHora,
-      texto: `📎 He recibido y procesado tu archivo real "${body.archivo_nombre}" en el trámite ${caso.codigo_tramite}. Ya está disponible en el visor de la Ficha del Trámite para revisión y aprobación del Abogado Verificador.`,
-      hallazgos: camposNuevos.map((c) => `${c.clave}: ${c.valor}`),
+      texto: textoRespuestaSubida,
+      hallazgos: hallazgosSubida,
       alertas_rojas: [],
-      preguntas_pendientes: [],
+      preguntas_pendientes: matchConstructora
+        ? [`¿Confirmas ingresar esta documentación al Apartamento ${matchConstructora.unidad.apartamento} (${matchConstructora.unidad.bloque}) del proyecto ${matchConstructora.proyecto.nombre_proyecto}?`]
+        : [],
       tarjetas_tramites: [resumirTarjetaCaso(caso)],
-      acciones_sugeridas: [
-        { tipo: 'VER_FICHA_TRAMITE', etiqueta: 'Ver Archivo Subido en la Ficha del Trámite' },
-        estadoBpmn.siguiente_accion
-      ]
+      acciones_sugeridas: accionesMsg
     });
 
     caso.bitacora.push({
@@ -2040,6 +2382,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, {
       ok: true,
       documento_subido: docTarget,
+      coincidencia_constructora: matchConstructora ? caso.constructora_sugerida : null,
       caso_activo: caso,
       casos: store.casos,
       estado_bpmn: estadoBpmn,
@@ -2047,7 +2390,7 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // ENDPOINT DE CHAT INTELIGENTE: Busca trámites por cédula/CHIP/nombre, valida duplicados abiertos, crea trámites con Certificado de Tradición, captura correos y vincula Constructoras
+  // ENDPOINT DE CHAT INTELIGENTE (HABLADO O ESCRITO): Busca trámites, valida duplicados, aparta o cambia dueños de apartamentos en Constructora, vincula trámites en línea y captura correos
   if (req.method === 'POST' && pathname === '/api/chat') {
     const body = await parseJsonBody(req);
     const store = loadStore();
@@ -2106,7 +2449,6 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-      // Si ya tiene Visto Bueno del Abogado, verificar que todas las partes tengan correo y enviar
       const sinCorreo = caso.partes.filter((p) => !p.correo_electronico || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.correo_electronico));
       if (sinCorreo.length === 0) {
         caso.aprobaciones.enviado_a_clientes = true;
@@ -2166,7 +2508,6 @@ const server = http.createServer(async (req, res) => {
       const tipoRaw = String(body.tipo_corto || body.tipo_tramite || msgLower).toUpperCase();
       const tipoCorto = tipoRaw.includes('HIPOTECA') ? 'HIPOTECA' : tipoRaw.includes('CANCELACION') ? 'CANCELACION' : tipoRaw.includes('SUCESION') ? 'SUCESION' : 'COMPRAVENTA';
 
-      // Si el usuario escribió en el chat "quiero abrir un nuevo trámite" pero no adjuntó el Certificado ni indicó el CHIP/Matrícula, pedirle que adjunte su archivo real
       if (!chipInput && !matriculaInput) {
         caso.mensajes_chat.push({
           id: 'm-ag-' + Date.now(),
@@ -2191,7 +2532,6 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-      // Verificar si ya existe un trámite ABIERTO con ese mismo CHIP o Matrícula
       const existenteAbierto = store.casos.find(
         (c) =>
           c.estado_apertura === 'ABIERTO' &&
@@ -2266,7 +2606,203 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // 2. BÚSQUEDA REAL DE TRÁMITES DESDE EL CHAT (Por nombre, cédula, CHIP, estado abierto/cerrado o tipo de trámite)
+    // 2. FLUJO CONVERSACIONAL DE CONSTRUCTORA DESDE EL CHAT (Apartar apartamento sin documentación aún, Cambiar de dueño un apartamento, o Vincular un trámite en línea y aprobar con Abogado)
+    const mencionaApto = /\b(?:apto|apartamento|unidad)\s*([0-9]{2,4})\b/i.exec(msgRaw);
+    const mencionaTorre = /\b(?:torre|bloque)\s*([a-fA-F1-9])\b/i.exec(msgRaw);
+    const esComandoConstructora =
+      body.vincular_constructora ||
+      body.apartar_unidad_constructora ||
+      body.cambiar_dueno_constructora ||
+      mencionaApto !== null ||
+      msgLower.includes('constructora') ||
+      msgLower.includes('apartado') ||
+      msgLower.includes('apartar') ||
+      msgLower.includes('cambio de dueño') ||
+      msgLower.includes('cambió de dueño') ||
+      msgLower.includes('cambiar dueño') ||
+      msgLower.includes('nuevo dueño') ||
+      msgLower.includes('ingresar esta documentacion') ||
+      msgLower.includes('ingresar esta documentación');
+
+    if (esComandoConstructora && !body.buscar_tramites) {
+      const proy =
+        store.proyectos_constructoras.find(
+          (p) =>
+            p.proyecto_id === body.proyecto_id ||
+            msgLower.includes(p.nombre_proyecto.toLowerCase().split(' ')[0])
+        ) || store.proyectos_constructoras[0];
+
+      const letraTorre = body.torre_bloque || body.torre || (mencionaTorre ? `Torre ${mencionaTorre[1].toUpperCase()}` : proy.bloques_configurados[0] || 'Torre A');
+      const torreElegida = letraTorre.startsWith('Torre') || letraTorre.startsWith('Bloque') ? letraTorre : `Torre ${letraTorre}`;
+      const aptoNumero = String(body.apartamento || (mencionaApto ? mencionaApto[1] : '801')).replace(/^Apartamento\s+/i, '').trim();
+      const unidadId = `${torreElegida.replace(/^(Torre|Bloque)\s+/i, '').trim()}-${aptoNumero}`;
+
+      let unidad = proy.unidades.find((u) => u.unidad_id === unidadId || (u.bloque === torreElegida && u.apartamento === aptoNumero));
+      if (!unidad) {
+        unidad = {
+          unidad_id: unidadId,
+          bloque: torreElegida,
+          apartamento: aptoNumero,
+          tipo_apto: 'TIPO_A',
+          area_m2: 78,
+          valor_venta: 395000000,
+          comprador_nombre: '',
+          comprador_cc: '',
+          historial_duenos: [],
+          forma_pago: 'Por definir',
+          estado_dinamico: 'Sin comprador',
+          tiene_alerta_vencimiento: false,
+          documentos_recibidos: 0,
+          documentos_totales: 7,
+          minuta_firmada: false
+        };
+        proy.unidades.push(unidad);
+      }
+      if (!Array.isArray(unidad.historial_duenos)) {
+        unidad.historial_duenos = [];
+      }
+
+      const todosNumeros = msgRaw.match(/\b(\d{1,3}(?:\.\d{3}){1,2}|\d{6,10})\b/g) || [];
+      const cedulaExtraida = body.comprador_cc || body.cedula || (todosNumeros.find((n) => n.replace(/\D/g, '') !== aptoNumero) || '');
+
+      let nombreExtraido = (body.comprador_nombre || body.nombre || '').trim();
+      if (!nombreExtraido) {
+        const regexPara = /(?:para|a nombre de|comprador|dueño\s+a|dueno\s+a|dueño|dueno|cliente|señor|senor|señora|senora)\s+([a-záéíóúñA-ZÁÉÍÓÚÑ]+(?:\s+[a-záéíóúñA-ZÁÉÍÓÚÑ]+){1,4}?)(?=\s+(?:con|c[eé]dula|cc|c\.c\.|documento|en|del|de|torre|apto|apartamento|[0-9])|$)/i;
+        const mNom = regexPara.exec(msgRaw);
+        if (mNom && mNom[1]) {
+          nombreExtraido = mNom[1].replace(/^a\s+/i, '').trim();
+        }
+      }
+
+      const esApartadoOCambioDueno =
+        Boolean(body.apartar_unidad_constructora || body.cambiar_dueno_constructora) ||
+        Boolean(nombreExtraido && cedulaExtraida) ||
+        msgLower.includes('apartar') ||
+        msgLower.includes('apartado') ||
+        msgLower.includes('dueño') ||
+        msgLower.includes('dueno');
+
+      if (esApartadoOCambioDueno && (nombreExtraido || cedulaExtraida)) {
+        const duenoAnterior =
+          unidad.comprador_nombre && unidad.comprador_nombre !== nombreExtraido
+            ? `${unidad.comprador_nombre} (C.C. ${unidad.comprador_cc || 'S/D'})`
+            : null;
+
+        if (duenoAnterior) {
+          unidad.historial_duenos.push({
+            nombre: unidad.comprador_nombre,
+            cedula: unidad.comprador_cc || '',
+            fecha_cambio: new Date().toLocaleString('es-CO'),
+            motivo: 'Cambio de comprador / cesión registrada desde el chat'
+          });
+        }
+
+        if (nombreExtraido) unidad.comprador_nombre = nombreExtraido;
+        if (cedulaExtraida) unidad.comprador_cc = cedulaExtraida;
+
+        const sinDocsAun =
+          msgLower.includes('sin document') ||
+          msgLower.includes('apartar') ||
+          msgLower.includes('apartado') ||
+          unidad.documentos_recibidos === 0;
+
+        if (sinDocsAun && !body.vincular_tramite_actual) {
+          unidad.estado_dinamico = 'Apartado · Sin documentación';
+          unidad.documentos_recibidos = 0;
+        } else {
+          unidad.estado_dinamico = 'Documentos pendientes';
+        }
+
+        const hallazgosResp = [
+          `Proyecto: ${proy.nombre_proyecto} (${proy.constructora})`,
+          `Unidad Apartada / Actualizada: ${torreElegida} · Apartamento ${aptoNumero} (${unidad.unidad_id})`,
+          `Titular / Comprador Actual: ${unidad.comprador_nombre} (C.C. ${unidad.comprador_cc})`,
+          `Estado del Apartamento: "${unidad.estado_dinamico}"`
+        ];
+        if (duenoAnterior) {
+          hallazgosResp.push(`Dueño Anterior guardado en historial: ${duenoAnterior}`);
+        }
+
+        caso.mensajes_chat.push({
+          id: 'm-ag-' + Date.now(),
+          emisor: 'ASISTENTE',
+          autor: 'Asistente Notarial',
+          hora: ahoraHora,
+          texto: duenoAnterior
+            ? `He actualizado el comprador del Apartamento ${aptoNumero} (${torreElegida}) en "${proy.nombre_proyecto}". El anterior titular (${duenoAnterior}) quedó en el historial de la unidad y el nuevo comprador es ${unidad.comprador_nombre} (C.C. ${unidad.comprador_cc}). Cuando subas su Cédula o el Certificado de Libertad de este apartamento, lo detectaré automáticamente y le preguntaré al Abogado para ingresar la documentación.`
+            : `He registrado el Apartamento ${aptoNumero} (${torreElegida}) del proyecto "${proy.nombre_proyecto}" como APARTADO a nombre de ${unidad.comprador_nombre} (C.C. ${unidad.comprador_cc}) sin documentación todavía. Apenas llegue su Cédula de Comprador o el Certificado de Libertad, reconoceré automáticamente la cédula ${unidad.comprador_cc} o el apartamento ${aptoNumero} y le pediré aprobación al Abogado para ingresar los documentos.`,
+          hallazgos: hallazgosResp,
+          alertas_rojas: [],
+          preguntas_pendientes: [
+            `Cuando llegue la Cédula de ${unidad.comprador_nombre} (C.C. ${unidad.comprador_cc}) o el Certificado de Libertad del Apto ${aptoNumero}, súbelo con "📎 Adjuntar Documento Real" y el sistema te propondrá vincularlo.`
+          ],
+          acciones_sugeridas: [
+            { tipo: 'ABRIR_MODAL_SUBIR_ARCHIVO', etiqueta: `📎 Subir Cédula o Certificado cuando llegue (${unidad.comprador_nombre})` },
+            { tipo: 'VER_PROYECTOS_CONSTRUCTORA', etiqueta: `Ver Matriz de Apartamentos (${proy.nombre_proyecto})` }
+          ]
+        });
+
+        saveStore(store);
+        return sendJson(res, 200, {
+          ok: true,
+          unidad_actualizada: unidad,
+          caso_activo: caso,
+          proyectos_constructoras: store.proyectos_constructoras,
+          estado_bpmn: calcularEstadoBpmn(caso),
+          minuta_generada_actual: generarTextoMinuta(caso)
+        });
+      }
+
+      // SUBCASO B: Un trámite que YA está en línea se asigna desde el chat a un apartamento (y queda pendiente de aprobación del Abogado)
+      caso.constructora_sugerida = {
+        proyecto_id: proy.proyecto_id,
+        nombre_proyecto: proy.nombre_proyecto,
+        constructora: proy.constructora,
+        torre_bloque: torreElegida,
+        apartamento: aptoNumero,
+        unidad_id: unidad.unidad_id,
+        comprador_apartado: unidad.comprador_nombre || (caso.partes.find((p) => p.rol === 'COMPRADOR')?.nombres_completos || caso.partes[0]?.nombres_completos),
+        comprador_cc: unidad.comprador_cc || (caso.partes.find((p) => p.rol === 'COMPRADOR')?.numero_documento || caso.partes[0]?.numero_documento),
+        historial_duenos: unidad.historial_duenos || [],
+        motivo: `Solicitado en el chat por ${usuarioActivo.nombre}`,
+        aprobado_abogado: false
+      };
+
+      caso.mensajes_chat.push({
+        id: 'm-ag-' + Date.now(),
+        emisor: 'ASISTENTE',
+        autor: 'Asistente Notarial',
+        hora: ahoraHora,
+        texto: `He preparado la vinculación del trámite en línea ${caso.codigo_tramite} con el Apartamento ${aptoNumero} (${torreElegida}) del proyecto "${proy.nombre_proyecto}". ¿El Abogado aprueba ingresar la documentación de este trámite al Apartamento ${aptoNumero}?`,
+        hallazgos: [
+          `Trámite en línea: ${caso.codigo_tramite}`,
+          `Destino Constructora: ${proy.nombre_proyecto} · ${torreElegida} · Apartamento ${aptoNumero}`,
+          `Comprador registrado en unidad: ${caso.constructora_sugerida.comprador_apartado} (C.C. ${caso.constructora_sugerida.comprador_cc})`
+        ],
+        alertas_rojas: [],
+        preguntas_pendientes: [
+          `Confirma con el botón de abajo para que quede aprobado por el Abogado el ingreso de este trámite al Apartamento ${aptoNumero}.`
+        ],
+        acciones_sugeridas: [
+          {
+            tipo: 'APROBAR_VINCULACION_CONSTRUCTORA',
+            etiqueta: `✓ Aprobar e Ingresar Trámite al Apto ${aptoNumero} (${torreElegida})`
+          },
+          { tipo: 'VER_FICHA_TRAMITE', etiqueta: 'Ver Ficha del Trámite' }
+        ]
+      });
+
+      saveStore(store);
+      return sendJson(res, 200, {
+        ok: true,
+        caso_activo: caso,
+        proyectos_constructoras: store.proyectos_constructoras,
+        estado_bpmn: calcularEstadoBpmn(caso),
+        minuta_generada_actual: generarTextoMinuta(caso)
+      });
+    }
+
+    // 3. BÚSQUEDA REAL DE TRÁMITES DESDE EL CHAT (Por nombre, cédula, CHIP, estado abierto/cerrado o tipo de trámite)
     const esBusqueda =
       body.buscar_tramites ||
       msgLower.includes('dime el tramite') ||
@@ -2291,7 +2827,7 @@ const server = http.createServer(async (req, res) => {
       msgLower.includes('todos los tramites') ||
       msgLower.includes('todos los trámites');
 
-    if (esBusqueda && !body.subir_cedula_monica && !body.vincular_constructora) {
+    if (esBusqueda && !body.subir_cedula_monica) {
       const q = (body.filtro_busqueda || msgLower).trim();
       const stopWords = new Set(['oye', 'dime', 'el', 'la', 'los', 'las', 'de', 'del', 'tramite', 'trámite', 'tramites', 'trámites', 'buscar', 'busca', 'muestrame', 'muéstrame', 'ver', 'por', 'favor', 'cedula', 'cédula', 'chip', 'con', 'y', 'o']);
       const tokens = q
@@ -2315,7 +2851,6 @@ const server = http.createServer(async (req, res) => {
           .join(' ')
           .toLowerCase();
 
-        // Coincidencia real por tokens del usuario; si consulta por Mauricio Téllez (79.451.200), incluye además el histórico cerrado para comparar abiertos vs cerrados
         const matchTokens = tokens.some((tk) => blob.includes(tk) || blob.includes(tk.replace(/\./g, '')));
         if ((q.includes('mauricio') || q.includes('tellez') || q.includes('téllez') || q.includes('79.451.200')) && c.estado_apertura === 'CERRADO') {
           return true;
@@ -2350,86 +2885,6 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         caso_activo: caso,
         resultados_busqueda: resultados.map(resumirTarjetaCaso),
-        estado_bpmn: calcularEstadoBpmn(caso),
-        minuta_generada_actual: generarTextoMinuta(caso)
-      });
-    }
-
-    // 3. VINCULACIÓN CON PROYECTO DE CONSTRUCTORA DESDE EL CHAT (100% dinámico según proyecto, torre y apartamento reales)
-    if (
-      body.vincular_constructora ||
-      msgLower.includes('constructora') ||
-      msgLower.includes('torre') ||
-      (msgLower.includes('si') && msgLower.includes('apto'))
-    ) {
-      const proy =
-        store.proyectos_constructoras.find((p) => p.proyecto_id === body.proyecto_id) ||
-        store.proyectos_constructoras[0];
-      const torreElegida = body.torre_bloque || body.torre || proy.bloques_configurados[0] || 'Torre A';
-      const aptoRaw = String(body.apartamento || '401');
-      const aptoNumero = aptoRaw.replace(/^Apartamento\s+/i, '').trim();
-      const unidadId = `${torreElegida.replace('Torre ', '').trim()}-${aptoNumero}`;
-
-      caso.pertenece_constructora = true;
-      if (!caso.subcategorias_activas.includes('SUB-PROYECTO-CONSTRUCTORA')) {
-        caso.subcategorias_activas.push('SUB-PROYECTO-CONSTRUCTORA');
-      }
-      caso.constructora_info = {
-        proyecto_id: proy.proyecto_id,
-        nombre_proyecto: proy.nombre_proyecto,
-        torre_bloque: torreElegida,
-        apartamento: aptoRaw
-      };
-      caso.constructora_vinculada = {
-        es_constructora: true,
-        proyecto_id: proy.proyecto_id,
-        nombre_proyecto: proy.nombre_proyecto,
-        torre: torreElegida,
-        torre_bloque: torreElegida,
-        apartamento: aptoRaw
-      };
-
-      const compradorParte = caso.partes.find((p) => p.rol === 'COMPRADOR') || caso.partes[0];
-      const unidad = proy.unidades.find((u) => u.unidad_id === unidadId || (u.bloque === torreElegida && u.apartamento === aptoNumero));
-      if (unidad) {
-        unidad.estado_dinamico = 'En revisión';
-        if (compradorParte) {
-          unidad.comprador_nombre = compradorParte.nombres_completos;
-          unidad.comprador_cc = compradorParte.numero_documento;
-        }
-      }
-
-      caso.bitacora.push({
-        id: 'ev-const-' + Date.now(),
-        fecha: new Date().toLocaleString('es-CO'),
-        actor: usuarioActivo.nombre,
-        etapa: 'Vinculación Constructora',
-        detalle: `Trámite vinculado a ${proy.nombre_proyecto} · ${torreElegida} · Apartamento ${aptoNumero}. Documentos matriz heredados.`
-      });
-
-      caso.mensajes_chat.push({
-        id: 'm-ag-' + Date.now(),
-        emisor: 'ASISTENTE',
-        autor: 'Asistente Notarial',
-        hora: ahoraHora,
-        texto: `He vinculado este trámite (${caso.codigo_tramite}) al proyecto "${proy.nombre_proyecto}", ${torreElegida}, Apartamento ${aptoNumero}. Heredé los documentos matriz y actualicé el estado de la unidad ${unidadId} en el proyecto.`,
-        hallazgos: [
-          `Proyecto: ${proy.nombre_proyecto} (${proy.constructora})`,
-          `Ubicación guardada: ${torreElegida} · Apartamento ${aptoNumero} (Unidad ${unidadId})`,
-          `Estado actualizado en Constructora: "En revisión"`
-        ],
-        alertas_rojas: [],
-        preguntas_pendientes: [],
-        acciones_sugeridas: [
-          { tipo: 'VER_FICHA_TRAMITE', etiqueta: 'Ver Ficha del Trámite (Con Proyecto y Documentos)' }
-        ]
-      });
-
-      saveStore(store);
-      return sendJson(res, 200, {
-        ok: true,
-        caso_activo: caso,
-        proyectos_constructoras: store.proyectos_constructoras,
         estado_bpmn: calcularEstadoBpmn(caso),
         minuta_generada_actual: generarTextoMinuta(caso)
       });
@@ -2498,8 +2953,8 @@ const server = http.createServer(async (req, res) => {
     if (dudas.length > 0) {
       preguntas.push(`Hay ${dudas.length} puntos con sello en la minuta anterior escaneada que requieren aprobación en la Ficha del Trámite.`);
     }
-    if (!caso.pertenece_constructora) {
-      preguntas.push('¿Este trámite pertenece a algún proyecto de Constructora? (Puedes vincularlo en la Ficha seleccionando Proyecto, Torre y Apartamento).');
+    if (!caso.pertenece_constructora && !caso.constructora_sugerida) {
+      preguntas.push('Si este trámite es de Constructora o quieres apartar/cambiar el dueño de un apartamento, dímelo aquí en el chat o por micrófono (ej. "Este trámite va al apto 401 Torre A" o "Apartar apto 801 Torre A para Carlos Mejía CC 80.123.456").');
     }
 
     const estadoBpmn = calcularEstadoBpmn(caso);

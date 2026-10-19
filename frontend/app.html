@@ -62,31 +62,35 @@
         const [vistaActiva, setVistaActiva] = useState('CHAT_PURO');
         const [tabConfig, setTabConfig] = useState('TRAMITES');
 
-        // Interacción en el Chat
+        // Interacción en el Chat + Voz Bidireccional (Micrófono Speech-to-Text + Voz Google Cloud TTS opcional)
         const [mensajeInput, setMensajeInput] = useState('');
         const [notificacion, setNotificacion] = useState('');
         const [errorAlerta, setErrorAlerta] = useState('');
+        const [vozActiva, setVozActiva] = useState(false);
+        const [escuchandoMic, setEscuchandoMic] = useState(false);
+        const [reproduciendoMsgId, setReproduciendoMsgId] = useState(null);
 
         // Cargador Real de Archivos desde el Computador (<input type="file">)
         const [modalSubidaAbierto, setModalSubidaAbierto] = useState(false);
-        const [modoAperturaNuevoTramite, setModoAperturaNuevoTramite] = useState(false);
+        const [modoSubida, setModoSubida] = useState('ADJUNTAR_DOC');
         const [archivoSeleccionadoNombre, setArchivoSeleccionadoNombre] = useState('');
+        const [archivoSeleccionadoTamano, setArchivoSeleccionadoTamano] = useState(0);
         const [archivoDataUrl, setArchivoDataUrl] = useState('');
-        const [archivoTipoMime, setArchivoTipoMime] = useState('');
-        const [archivoTextoExtraido, setArchivoTextoExtraido] = useState('');
-        const [leyendoArchivo, setLeyendoArchivo] = useState(false);
+        const [archivoMime, setArchivoMime] = useState('');
+        const [textoExtraidoArchivo, setTextoExtraidoArchivo] = useState('');
+        const [extrayendoArchivo, setExtrayendoArchivo] = useState(false);
         const [tipoDocSubida, setTipoDocSubida] = useState('CERTIFICADO_TRADICION');
-        const [tramiteIdApertura, setTramiteIdApertura] = useState('TRM-01-COMPRAVENTA');
-        const [chipSubida, setChipSubida] = useState('');
-        const [matriculaSubida, setMatriculaSubida] = useState('');
-        const [cedulaCatastralSubida, setCedulaCatastralSubida] = useState('');
-        const [direccionSubida, setDireccionSubida] = useState('');
-        const [nombrePropietarioSubida, setNombrePropietarioSubida] = useState('');
-        const [cedulaSubida, setCedulaSubida] = useState('');
-        const [correoSubida, setCorreoSubida] = useState('');
-        const [rolParteSubida, setRolParteSubida] = useState('VENDEDOR');
+        const [subidaTramiteId, setSubidaTramiteId] = useState('TRM-01-COMPRAVENTA');
+        const [subidaChip, setSubidaChip] = useState('');
+        const [subidaMatricula, setSubidaMatricula] = useState('');
+        const [subidaCedulaCatastral, setSubidaCedulaCatastral] = useState('');
+        const [subidaDireccion, setSubidaDireccion] = useState('');
+        const [subidaPropietarioNombre, setSubidaPropietarioNombre] = useState('');
+        const [subidaPropietarioCedula, setSubidaPropietarioCedula] = useState('');
+        const [subidaPropietarioCorreo, setSubidaPropietarioCorreo] = useState('');
+        const [subidaRolParte, setSubidaRolParte] = useState('VENDEDOR');
         const [parteDestinoIdSubida, setParteDestinoIdSubida] = useState('');
-        const [docDestinoIdSubida, setDocDestinoIdSubida] = useState('');
+        const [docIdReemplazar, setDocIdReemplazar] = useState('');
 
         // Documento seleccionado dentro de la Ficha del Trámite para ver su Imagen Escaneada y Corregir/Aprobar
         const [docSeleccionadoId, setDocSeleccionadoId] = useState('doc-6');
@@ -143,6 +147,8 @@
 
         const chatEndRef = useRef(null);
         const fileInputRef = useRef(null);
+        const recognitionRef = useRef(null);
+        const audioPlayerRef = useRef(null);
 
         const mostrarAviso = (txt) => {
           setErrorAlerta('');
@@ -154,6 +160,103 @@
           setNotificacion('');
           setErrorAlerta(txt);
           setTimeout(() => setErrorAlerta(''), 6000);
+        };
+
+        // Síntesis de Voz del Agente (Google Cloud Text-to-Speech Neural2 + Fallback instantáneo Web Speech API)
+        const hablarTextoAgente = async (texto, msgId = 'ultimo') => {
+          if (!texto) return;
+          try {
+            if (audioPlayerRef.current) {
+              audioPlayerRef.current.pause();
+              audioPlayerRef.current = null;
+            }
+            if (window.speechSynthesis) {
+              window.speechSynthesis.cancel();
+            }
+            if (reproduciendoMsgId === msgId) {
+              setReproduciendoMsgId(null);
+              return;
+            }
+            setReproduciendoMsgId(msgId);
+            const res = await fetch('/api/voz/tts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ texto, voz: 'es-US-Neural2-B' })
+            });
+            const json = await res.json();
+            if (json && json.audio_data_url) {
+              const audio = new Audio(json.audio_data_url);
+              audioPlayerRef.current = audio;
+              audio.onended = () => setReproduciendoMsgId(null);
+              audio.onerror = () => setReproduciendoMsgId(null);
+              await audio.play();
+              return;
+            }
+            // Fallback limpio al sintetizador nativo del navegador si no hay red externa
+            if (window.speechSynthesis) {
+              const limpio = String(texto).replace(/[✓•→⚠️✉️🎙️🔊📎📄]/g, ' ');
+              const utter = new SpeechSynthesisUtterance(limpio);
+              utter.lang = 'es-CO';
+              utter.rate = 1.03;
+              utter.onend = () => setReproduciendoMsgId(null);
+              utter.onerror = () => setReproduciendoMsgId(null);
+              window.speechSynthesis.speak(utter);
+            } else {
+              setReproduciendoMsgId(null);
+            }
+          } catch (e) {
+            console.error('Error reproduciendo voz del agente:', e);
+            setReproduciendoMsgId(null);
+          }
+        };
+
+        // Micrófono Conversacional (Speech-to-Text en Español)
+        const alternarMicrofono = () => {
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          if (!SpeechRecognition) {
+            mostrarError('Tu navegador no soporta reconocimiento de voz directo. Usa Google Chrome o Microsoft Edge.');
+            return;
+          }
+          if (escuchandoMic && recognitionRef.current) {
+            recognitionRef.current.stop();
+            setEscuchandoMic(false);
+            return;
+          }
+          const rec = new SpeechRecognition();
+          rec.lang = 'es-CO';
+          rec.interimResults = true;
+          rec.continuous = false;
+          recognitionRef.current = rec;
+
+          let transcripcionFinal = '';
+          rec.onstart = () => {
+            setEscuchandoMic(true);
+            mostrarAviso('🎙️ Escuchando... Habla ahora (ej. "Apartar apto 801 Torre A para Carlos Mejía cédula 80.123.456").');
+          };
+          rec.onresult = (event) => {
+            let textoParcial = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const t = event.results[i][0].transcript;
+              if (event.results[i].isFinal) {
+                transcripcionFinal += t + ' ';
+              } else {
+                textoParcial += t;
+              }
+            }
+            setMensajeInput((transcripcionFinal + textoParcial).trim());
+          };
+          rec.onerror = (ev) => {
+            console.error('Error micrófono:', ev.error);
+            setEscuchandoMic(false);
+          };
+          rec.onend = async () => {
+            setEscuchandoMic(false);
+            const textoListo = transcripcionFinal.trim();
+            if (textoListo) {
+              await enviarInteraccionAgente({ mensaje: textoListo }, true);
+            }
+          };
+          rec.start();
         };
 
         const cargarEstado = async () => {
@@ -174,8 +277,10 @@
               setDocSeleccionadoId(actual.id);
               setCamposEditablesDoc(actual.campos_leidos_agente || []);
             }
+            return json;
           } catch (e) {
             console.error(e);
+            return null;
           } finally {
             setLoading(false);
           }
@@ -235,30 +340,53 @@
           );
           const propM = fuente.match(/(?:A:|PROPIETARIO(?:S)?|TITULAR(?:ES)?|DE:|APELLIDOS Y NOMBRES)[:\s]+([A-ZÁÉÍÓÚÑ\s]{5,55})/i);
 
-          if (chipM) setChipSubida(chipM[0].toUpperCase());
-          if (matM) setMatriculaSubida((matM[1] || matM[0]).toUpperCase());
-          if (catM) setCedulaCatastralSubida(catM[0]);
-          if (dirM) setDireccionSubida((dirM[1] || dirM[0]).trim());
-          if (cedulas[0] && !cedulaSubida) setCedulaSubida(cedulas[0]);
-          if (propM && !nombrePropietarioSubida) setNombrePropietarioSubida(propM[1].trim().toUpperCase());
+          if (chipM) setSubidaChip(chipM[0].toUpperCase());
+          if (matM) setSubidaMatricula((matM[1] || matM[0]).toUpperCase());
+          if (catM) setSubidaCedulaCatastral(catM[0]);
+          if (dirM) setSubidaDireccion((dirM[1] || dirM[0]).trim());
+          if (cedulas[0] && !subidaPropietarioCedula) setSubidaPropietarioCedula(cedulas[0]);
+          if (propM && !subidaPropietarioNombre) setSubidaPropietarioNombre(propM[1].trim().toUpperCase());
         };
 
-        const abrirSelectorArchivoReal = (opciones = {}) => {
+        const abrirSelectorArchivoReal = (arg1 = {}, arg2 = 'CERTIFICADO_TRADICION', arg3 = '') => {
+          let modo = 'ADJUNTAR_DOC';
+          let tipoDoc = 'CERTIFICADO_TRADICION';
+          let docReemp = '';
+          let nombreSug = '';
+          let cedulaSug = '';
+          let correoSug = '';
+          let parteId = '';
+
+          if (typeof arg1 === 'string') {
+            modo = arg1 === 'ABRIR_TRAMITE' ? 'ABRIR_TRAMITE' : 'ADJUNTAR_DOC';
+            tipoDoc = arg2 || (modo === 'ABRIR_TRAMITE' ? 'CERTIFICADO_TRADICION' : 'CEDULA');
+            docReemp = arg3 || '';
+          } else if (arg1 && typeof arg1 === 'object') {
+            modo = arg1.abrirTramiteNuevo || arg1.modo === 'ABRIR_TRAMITE' ? 'ABRIR_TRAMITE' : 'ADJUNTAR_DOC';
+            tipoDoc = arg1.tipoDoc || (modo === 'ABRIR_TRAMITE' ? 'CERTIFICADO_TRADICION' : 'CEDULA');
+            docReemp = arg1.documentoId || '';
+            parteId = arg1.parteId || '';
+            nombreSug = arg1.nombreSugerido || '';
+            cedulaSug = arg1.cedulaSugerida || '';
+            correoSug = arg1.correoSugerido || '';
+          }
+
           setArchivoSeleccionadoNombre('');
+          setArchivoSeleccionadoTamano(0);
           setArchivoDataUrl('');
-          setArchivoTipoMime('');
-          setArchivoTextoExtraido('');
-          setModoAperturaNuevoTramite(Boolean(opciones.abrirTramiteNuevo));
-          setTipoDocSubida(opciones.tipoDoc || (opciones.abrirTramiteNuevo ? 'CERTIFICADO_TRADICION' : 'CERTIFICADO_TRADICION'));
-          setParteDestinoIdSubida(opciones.parteId || '');
-          setDocDestinoIdSubida(opciones.documentoId || '');
-          setChipSubida('');
-          setMatriculaSubida('');
-          setCedulaCatastralSubida('');
-          setDireccionSubida('');
-          setNombrePropietarioSubida(opciones.nombreSugerido || '');
-          setCedulaSubida(opciones.cedulaSugerida || '');
-          setCorreoSubida(opciones.correoSugerido || '');
+          setArchivoMime('');
+          setTextoExtraidoArchivo('');
+          setModoSubida(modo);
+          setTipoDocSubida(tipoDoc === 'CEDULA_CIUDADANIA' ? 'CEDULA' : tipoDoc);
+          setParteDestinoIdSubida(parteId);
+          setDocIdReemplazar(docReemp);
+          setSubidaChip('');
+          setSubidaMatricula('');
+          setSubidaCedulaCatastral('');
+          setSubidaDireccion('');
+          setSubidaPropietarioNombre(nombreSug);
+          setSubidaPropietarioCedula(cedulaSug);
+          setSubidaPropietarioCorreo(correoSug);
           setModalSubidaAbierto(true);
           setTimeout(() => {
             if (fileInputRef.current) fileInputRef.current.click();
@@ -268,18 +396,21 @@
         const manejarSeleccionArchivoInput = async (e) => {
           const file = e.target.files && e.target.files[0];
           if (!file) return;
-          setLeyendoArchivo(true);
+          setExtrayendoArchivo(true);
           setArchivoSeleccionadoNombre(file.name);
-          setArchivoTipoMime(file.type || 'application/pdf');
+          setArchivoSeleccionadoTamano(file.size || 0);
+          setArchivoMime(file.type || 'application/pdf');
 
           const fnameLow = file.name.toLowerCase();
-          if (!modoAperturaNuevoTramite) {
+          if (modoSubida !== 'ABRIR_TRAMITE') {
             if (fnameLow.includes('cedula') || fnameLow.includes('cédula') || fnameLow.includes('cc')) {
-              setTipoDocSubida('CEDULA_CIUDADANIA');
+              setTipoDocSubida('CEDULA');
             } else if (fnameLow.includes('paz') || fnameLow.includes('salvo') || fnameLow.includes('admin')) {
               setTipoDocSubida('PAZ_Y_SALVO_ADMIN');
+            } else if (fnameLow.includes('predial')) {
+              setTipoDocSubida('PAZ_Y_SALVO_PREDIAL');
             } else if (fnameLow.includes('escritura') || fnameLow.includes('minuta')) {
-              setTipoDocSubida('ESCRITURA_ANTERIOR');
+              setTipoDocSubida('ESCRITURA_ANTECEDENTE');
             } else if (fnameLow.includes('tradicion') || fnameLow.includes('tradición') || fnameLow.includes('libertad') || fnameLow.includes('snr')) {
               setTipoDocSubida('CERTIFICADO_TRADICION');
             }
@@ -290,41 +421,50 @@
             const dataUrl = ev.target.result;
             setArchivoDataUrl(dataUrl);
             const texto = await extraerTextoDeArchivoReal(file);
-            setArchivoTextoExtraido(texto);
+            setTextoExtraidoArchivo(texto);
             analizarTextoParaAutocompletar(texto, file.name);
-            setLeyendoArchivo(false);
+            setExtrayendoArchivo(false);
           };
           reader.readAsDataURL(file);
         };
 
         const confirmarSubidaArchivoReal = async (e) => {
-          e.preventDefault();
+          if (e && e.preventDefault) e.preventDefault();
           if (!archivoSeleccionadoNombre) {
             mostrarError('Por favor selecciona un archivo real (PDF o Imagen) desde tu computador.');
             return;
           }
+          const esApertura = modoSubida === 'ABRIR_TRAMITE';
           const res = await fetch('/api/documento/subir', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              accion_apertura: modoAperturaNuevoTramite ? 'ABRIR_TRAMITE_NUEVO' : 'ADJUNTAR_A_TRAMITE_ACTIVO',
-              abrir_tramite_nuevo: modoAperturaNuevoTramite,
-              tramite_id: tramiteIdApertura,
-              codigo_tipo: modoAperturaNuevoTramite ? 'CERTIFICADO_TRADICION' : tipoDocSubida,
+              modo: esApertura ? 'ABRIR_TRAMITE' : 'ADJUNTAR_DOC',
+              accion_apertura: esApertura ? 'ABRIR_TRAMITE_NUEVO' : 'ADJUNTAR_A_TRAMITE_ACTIVO',
+              abrir_tramite_nuevo: esApertura,
+              tramite_id: subidaTramiteId,
+              tipo_documento: esApertura ? 'CERTIFICADO_TRADICION' : tipoDocSubida,
+              codigo_tipo: esApertura ? 'CERTIFICADO_TRADICION' : tipoDocSubida,
               archivo_nombre: archivoSeleccionadoNombre,
               archivo_data_url: archivoDataUrl,
-              tipo_mime: archivoTipoMime,
-              texto_extraido: archivoTextoExtraido,
-              chip: chipSubida,
-              matricula: matriculaSubida,
-              cedula_catastral: cedulaCatastralSubida,
-              direccion: direccionSubida,
-              nombre_propietario: nombrePropietarioSubida,
-              cedula: cedulaSubida,
-              correo_electronico: correoSubida,
-              rol_parte: rolParteSubida,
+              archivo_mime: archivoMime,
+              tipo_mime: archivoMime,
+              archivo_tamano: archivoSeleccionadoTamano,
+              texto_extraido: textoExtraidoArchivo,
+              chip: subidaChip,
+              matricula: subidaMatricula,
+              cedula_catastral: subidaCedulaCatastral,
+              direccion: subidaDireccion,
+              propietario_nombre: subidaPropietarioNombre,
+              nombre_propietario: subidaPropietarioNombre,
+              propietario_cedula: subidaPropietarioCedula,
+              cedula: subidaPropietarioCedula,
+              propietario_correo: subidaPropietarioCorreo,
+              correo_electronico: subidaPropietarioCorreo,
+              rol_parte: subidaRolParte,
               parte_id: parteDestinoIdSubida,
-              documento_id: docDestinoIdSubida
+              doc_id_reemplazar: docIdReemplazar,
+              documento_id: docIdReemplazar
             })
           });
           const json = await res.json();
@@ -333,17 +473,50 @@
             return;
           }
           setModalSubidaAbierto(false);
-          await cargarEstado();
-          if (json.duplicado_bloqueado) {
+          const nuevoEstado = await cargarEstado();
+          if (json.coincidencia_constructora) {
+            mostrarAviso(
+              `🏗️ Cruce automático: Este documento coincide con el Apto ${json.coincidencia_constructora.apartamento} (${json.coincidencia_constructora.bloque}) de ${json.coincidencia_constructora.nombre_proyecto}. Confirma su ingreso como Abogado.`
+            );
+          } else if (json.duplicado_bloqueado) {
             mostrarAviso(`⚠️ El predio ya tiene el trámite ABIERTO ${json.tramite_existente?.codigo_tramite}. Te hemos llevado a ese expediente.`);
           } else if (json.nuevo_caso) {
             mostrarAviso(`✓ Trámite ${json.nuevo_caso.codigo_tramite} creado y abierto con tu archivo "${archivoSeleccionadoNombre}".`);
           } else {
-            if ( json.documento_subido ) {
+            if (json.documento_subido) {
               setDocSeleccionadoId(json.documento_subido.id);
               setCamposEditablesDoc(json.documento_subido.campos_leidos_agente || []);
             }
             mostrarAviso(`✓ Archivo "${archivoSeleccionadoNombre}" adjuntado al trámite.`);
+          }
+          const ultimoMsg = nuevoEstado?.caso_activo?.mensajes_chat?.slice(-1)?.[0];
+          if (vozActiva && ultimoMsg && ultimoMsg.emisor !== 'ABOGADO') {
+            hablarTextoAgente(ultimoMsg.texto, ultimoMsg.id);
+          }
+        };
+
+        const aprobarVinculacionConstructora = async (rechazar = false) => {
+          const res = await fetch('/api/constructoras/aprobar-vinculacion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rechazar })
+          });
+          const json = await res.json();
+          if (!res.ok || json.ok === false) {
+            mostrarError(json.error || 'No se pudo procesar la vinculación con la constructora.');
+            return;
+          }
+          const nuevoEstado = await cargarEstado();
+          if (rechazar) {
+            mostrarAviso('Sugerencia de vinculación con Constructora descartada.');
+          } else {
+            mostrarAviso(
+              `✓ Documentación ingresada y aprobada en ${json.constructora_info?.torre_bloque} · Apto ${json.constructora_info?.apartamento} (${json.constructora_info?.nombre_proyecto}).`
+            );
+          }
+          const ultimoMsg = nuevoEstado?.caso_activo?.mensajes_chat?.slice(-1)?.[0];
+          if (vozActiva && ultimoMsg && ultimoMsg.emisor !== 'ABOGADO') {
+            hablarTextoAgente(ultimoMsg.texto, ultimoMsg.id);
           }
         };
 
@@ -375,7 +548,7 @@
           }
         };
 
-        const enviarInteraccionAgente = async (payload = {}) => {
+        const enviarInteraccionAgente = async (payload = {}, forzarVoz = false) => {
           const res = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -383,9 +556,13 @@
           });
           const json = await res.json();
           setMensajeInput('');
-          await cargarEstado();
+          const nuevoEstado = await cargarEstado();
           if (json.duplicado_bloqueado) {
             mostrarAviso('Trámite ya ABIERTO: el Agente bloqueó el duplicado y te llevó al trámite existente.');
+          }
+          const ultimoMsg = nuevoEstado?.caso_activo?.mensajes_chat?.slice(-1)?.[0];
+          if ((vozActiva || forzarVoz) && ultimoMsg && ultimoMsg.emisor !== 'ABOGADO') {
+            hablarTextoAgente(ultimoMsg.texto, ultimoMsg.id);
           }
         };
 
@@ -509,13 +686,18 @@
         const ejecutarAccionBotonChat = async (tipo) => {
           if (tipo === 'VER_FICHA_TRAMITE') {
             setVistaActiva('FICHA_TRAMITE');
+          } else if (tipo === 'VER_PROYECTOS_CONSTRUCTORA') {
+            setTabConfig('PROYECTOS');
+            setVistaActiva('CONFIGURACION');
+          } else if (tipo === 'APROBAR_VINCULACION_CONSTRUCTORA') {
+            await aprobarVinculacionConstructora(false);
           } else if (tipo === 'ABRIR_MODAL_NUEVO_TRAMITE_ARCHIVO' || tipo === 'CREAR_TRAMITE_NUEVO_CHIP') {
-            abrirSelectorArchivoReal({ abrirTramiteNuevo: true, tipoDoc: 'CERTIFICADO_TRADICION' });
+            abrirSelectorArchivoReal('ABRIR_TRAMITE', 'CERTIFICADO_TRADICION', '');
           } else if (tipo === 'ABRIR_MODAL_SUBIR_ARCHIVO' || tipo === 'SUBIR_CEDULA_MONICA') {
             const parteFaltante = (data?.caso_activo?.partes || []).find((p) => !p.cedula_cargada);
             abrirSelectorArchivoReal({
               abrirTramiteNuevo: false,
-              tipoDoc: parteFaltante ? 'CEDULA_CIUDADANIA' : 'CERTIFICADO_TRADICION',
+              tipoDoc: parteFaltante ? 'CEDULA' : 'CERTIFICADO_TRADICION',
               parteId: parteFaltante?.id || '',
               nombreSugerido: parteFaltante?.nombres_completos || '',
               cedulaSugerida: parteFaltante?.numero_documento || '',
@@ -530,9 +712,9 @@
               proyecto_id: proyElegido?.proyecto_id,
               torre_bloque: torreConstructoraInput,
               apartamento: aptoConstructoraInput,
-              mensaje: `Vinculo este trámite al proyecto ${proyElegido?.nombre_proyecto || 'Constructora'}, ${torreConstructoraInput}, Apartamento ${aptoConstructoraInput}.`
+              mensaje: `Este trámite va al ${aptoConstructoraInput} ${torreConstructoraInput} del proyecto ${proyElegido?.nombre_proyecto || 'Constructora'}.`
             });
-            mostrarAviso(`Vinculado a ${proyElegido?.nombre_proyecto || 'Constructora'}: ${torreConstructoraInput} · Apto ${aptoConstructoraInput}.`);
+            mostrarAviso(`Sugerencia registrada para ${proyElegido?.nombre_proyecto || 'Constructora'}: ${torreConstructoraInput} · Apto ${aptoConstructoraInput}. Confírmala como Abogado.`);
           } else if (tipo === 'APROBAR_ABOGADO') {
             await avanzarFlujo('VISTO_BUENO_ABOGADO');
           } else if (tipo === 'ENVIAR_BORRADOR_CLIENTES') {
@@ -1098,7 +1280,7 @@
                   </div>
                 ) : (
                   <section className="bg-white rounded-xl border border-[#E6E4DD] flex flex-col flex-1 overflow-hidden">
-                    {/* Cabecera sobria del Chat centrada en el Trámite Activo */}
+                    {/* Cabecera sobria del Chat centrada en el Trámite Activo + Opción de Respuesta Hablada (Google Cloud TTS) */}
                     <div className="px-6 py-4 border-b border-[#E6E4DD] flex flex-wrap items-center justify-between gap-3 bg-[#FAF9F6]">
                       <div>
                         <div className="flex items-center gap-2">
@@ -1122,10 +1304,34 @@
                           </span>
                         </div>
                         <p className="text-[11px] text-[#78716C] mt-0.5">
-                          Todo lo que escribas o adjuntes aquí queda guardado en este trámite. Puedes subir un Certificado de Libertad real para abrir un trámite nuevo o adjuntar cédulas/documentos.
+                          Flujo conversacional (escrito o hablado con micrófono): aparta unidades de constructora, cambia dueños o sube cédulas/certificados con cruce automático.
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Configuración sencilla desde el chat para activar/silenciar la respuesta hablada */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nuevo = !vozActiva;
+                            setVozActiva(nuevo);
+                            if (!nuevo) {
+                              if (audioPlayerRef.current) audioPlayerRef.current.pause();
+                              if (window.speechSynthesis) window.speechSynthesis.cancel();
+                              setReproduciendoMsgId(null);
+                            } else {
+                              const ult = caso.mensajes_chat?.slice(-1)?.[0];
+                              if (ult) hablarTextoAgente(ult.texto, ult.id);
+                            }
+                          }}
+                          className={`px-3 py-2 rounded-lg text-xs font-medium border transition flex items-center gap-1.5 ${
+                            vozActiva
+                              ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]'
+                              : 'bg-white border-[#E6E4DD] text-[#78716C] hover:text-[#1C1917]'
+                          }`}
+                          title="El Agente siempre responde por escrito, y si activas esta opción también te responde hablado con voz de Google Cloud"
+                        >
+                          <span>{vozActiva ? '🔊 Respuesta Hablada: ON' : '🔇 Respuesta Hablada: OFF'}</span>
+                        </button>
                         <button
                           onClick={() => setVistaActiva('FICHA_TRAMITE')}
                           className="px-4 py-2 rounded-lg bg-[#1C1917] text-white text-xs font-medium hover:bg-black/85"
@@ -1159,7 +1365,23 @@
                           >
                             <div className="flex items-center justify-between gap-4 mb-2 text-[11px] text-[#78716C]">
                               <span className="font-semibold text-[#1C1917]">{m.autor}</span>
-                              <span className="mono-data">{m.hora}</span>
+                              <div className="flex items-center gap-2">
+                                {m.emisor !== 'ABOGADO' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => hablarTextoAgente(m.texto, m.id)}
+                                    className={`px-2 py-0.5 rounded border text-[10px] font-medium transition ${
+                                      reproduciendoMsgId === m.id
+                                        ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                                        : 'bg-[#FAF9F6] text-[#1C1917] border-[#E6E4DD] hover:bg-[#F0EFEA]'
+                                    }`}
+                                    title="Escuchar en voz alta la respuesta escrita del Agente"
+                                  >
+                                    {reproduciendoMsgId === m.id ? '⏹ Detener voz' : '🔊 Escuchar'}
+                                  </button>
+                                )}
+                                <span className="mono-data">{m.hora}</span>
+                              </div>
                             </div>
                             <p className="text-xs text-[#1C1917]">{m.texto}</p>
 
@@ -1271,7 +1493,7 @@
                       <div ref={chatEndRef} />
                     </div>
 
-                    {/* Barra de entrada del Chat + Botones de Carga Real de Archivos desde el PC */}
+                    {/* Barra de entrada del Chat + Espacio de Micrófono + Carga Real de Archivos + Comandos de Constructora */}
                     <div className="p-4 border-t border-[#E6E4DD] bg-[#FAF9F6] space-y-2.5">
                       <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
                         <div className="flex flex-wrap items-center gap-1.5">
@@ -1296,6 +1518,42 @@
                             type="button"
                             onClick={() =>
                               enviarInteraccionAgente({
+                                mensaje: 'Apartar apartamento 801 Torre A para Carlos Mejía cédula 80.123.456'
+                              })
+                            }
+                            className="px-2.5 py-1 rounded-md bg-white border border-[#E6E4DD] text-[#78716C] hover:text-[#1C1917]"
+                            title="Apartar apartamento en proyecto de constructora sin documentación aún"
+                          >
+                            🏗️ Apartar Apto Constructora
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              enviarInteraccionAgente({
+                                mensaje: 'El apartamento 401 Torre A cambió de dueño a Ana Vélez cédula 52.777.888'
+                              })
+                            }
+                            className="px-2.5 py-1 rounded-md bg-white border border-[#E6E4DD] text-[#78716C] hover:text-[#1C1917]"
+                            title="Actualizar comprador cuando un apartamento del conjunto nuevo cambia de dueño"
+                          >
+                            🔄 Cambio de Dueño Apto
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              enviarInteraccionAgente({
+                                mensaje: 'Este trámite va al apartamento 401 Torre A'
+                              })
+                            }
+                            className="px-2.5 py-1 rounded-md bg-white border border-[#E6E4DD] text-[#78716C] hover:text-[#1C1917]"
+                            title="Asignar trámite en línea a un apartamento de constructora y pedir aprobación del abogado"
+                          >
+                            📌 Asignar Trámite a Apto
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              enviarInteraccionAgente({
                                 buscar_tramites: true,
                                 filtro_busqueda: 'todos',
                                 mensaje: 'Muéstrame todos los trámites abiertos y cerrados'
@@ -1303,7 +1561,7 @@
                             }
                             className="px-2.5 py-1 rounded-md bg-white border border-[#E6E4DD] text-[#78716C] hover:text-[#1C1917]"
                           >
-                            Ver trámites abiertos y cerrados
+                            Ver trámites abiertos/cerrados
                           </button>
                         </div>
                       </div>
@@ -1314,18 +1572,33 @@
                           if (!mensajeInput.trim()) return;
                           enviarInteraccionAgente({ mensaje: mensajeInput });
                         }}
-                        className="flex gap-2"
+                        className="flex items-center gap-2"
                       >
+                        {/* Espacio del Micrófono (Hablar al Agente) */}
+                        <button
+                          type="button"
+                          onClick={alternarMicrofono}
+                          className={`px-3.5 py-2.5 rounded-lg text-xs font-medium border transition flex items-center gap-1.5 shrink-0 ${
+                            escuchandoMic
+                              ? 'bg-[#FEF3C7] border-[#B45309] text-[#B45309] font-semibold'
+                              : 'bg-white border-[#E6E4DD] text-[#1C1917] hover:bg-[#F0EFEA]'
+                          }`}
+                          title="Hablar por micrófono al Agente (Reconocimiento de voz en español)"
+                        >
+                          <span>{escuchandoMic ? '🛑 Escuchando... (Clic para enviar)' : '🎙️ Hablar'}</span>
+                        </button>
+
+                        {/* Espacio del Chat Escrito */}
                         <input
                           type="text"
                           value={mensajeInput}
                           onChange={(e) => setMensajeInput(e.target.value)}
-                          placeholder="Busca por cédula, CHIP o apellido, indica correos de los clientes o escribe al Agente..."
+                          placeholder="Escribe o habla con 🎙️: aparta apto con nombre y cédula, cambia dueño de apto, asigna trámite a apto o busca por cédula/CHIP..."
                           className="flex-1 bg-white border border-[#E6E4DD] rounded-lg px-4 py-2.5 text-xs text-[#1C1917] placeholder-[#78716C] focus:outline-none focus:border-[#1C1917]"
                         />
                         <button
                           type="submit"
-                          className="px-5 py-2.5 rounded-lg bg-[#1C1917] text-white text-xs font-medium hover:bg-black/85"
+                          className="px-5 py-2.5 rounded-lg bg-[#1C1917] text-white text-xs font-medium hover:bg-black/85 shrink-0"
                         >
                           Enviar al Agente
                         </button>
@@ -1340,9 +1613,10 @@
                 VISTA 2: FICHA COMPLETA DEL TRÁMITE (SE OCULTA EL CHAT)
                 Muestra:
                 1. Cadena BPMN de 6 Compuertas Estrictas (Con Envío por Correo a Clientes antes de Visto Bueno Clientes)
-                2. Alarmas y Proyecto Constructora dinámico
-                3. Información del Predio (Certificado de Libertad) + Vendedores y Compradores con Correos editables
-                4. Visor Escaneado Real (PDF / Imagen subida por el usuario o documento escaneado) + Lectura del Agente
+                2. Cinta compacta de Constructora (solo si aplica o si el Agente detectó cruce automático para aprobar)
+                3. Alarmas Activas del Trámite (12 columnas sin desperdiciar espacio)
+                4. Información del Predio (Certificado de Libertad) + Vendedores y Compradores con Correos editables
+                5. Visor Escaneado Real (PDF / Imagen subida por el usuario o documento escaneado) + Lectura del Agente
                ===================================================================== */}
             {vistaActiva === 'FICHA_TRAMITE' && (
               <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-6 space-y-6">
@@ -1513,130 +1787,93 @@
                       <div>{estadoBpmn.impreso ? '✓ Escritura cerrada' : 'Requiere paso 5'}</div>
                     </div>
                   </div>
+
+                  {/* CINTA COMPACTA DE 1 LÍNEA PARA CONSTRUCTORA (Solo aparece cuando hay sugerencia del Chat/Cruce Automático o cuando ya está vinculada; cero cajas fijas que quiten espacio) */}
+                  {caso.constructora_sugerida && (
+                    <div className="p-3.5 rounded-xl bg-[#FEF3C7]/55 border border-[#FDE68A] flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="space-y-0.5">
+                        <div className="font-semibold text-[#B45309]">
+                          🏗️ Cruce con Constructora pendiente de aprobación del Abogado: {caso.constructora_sugerida.nombre_proyecto} · {caso.constructora_sugerida.bloque} · Apto {caso.constructora_sugerida.apartamento}
+                        </div>
+                        <div className="text-[11px] text-[#78716C] mono-data">
+                          Comprador apartado: {caso.constructora_sugerida.comprador_nombre || 'Por confirmar'} (C.C. {caso.constructora_sugerida.comprador_cedula || 'N/A'}) · Motivo: {caso.constructora_sugerida.motivo || 'Cruce conversacional / documental'}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => aprobarVinculacionConstructora(false)}
+                          className="px-3.5 py-1.5 rounded-lg bg-[#1C1917] text-white text-xs font-medium hover:bg-black/85"
+                        >
+                          ✓ Aprobar e Ingresar Documentación al Apto {caso.constructora_sugerida.apartamento} (Abogado)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => aprobarVinculacionConstructora(true)}
+                          className="px-2.5 py-1.5 rounded-lg bg-white border border-[#E6E4DD] text-[11px] text-[#78716C] hover:text-[#1C1917]"
+                        >
+                          Descartar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {caso.pertenece_constructora && caso.constructora_info && !caso.constructora_sugerida && (
+                    <div className="px-4 py-2.5 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-[#15803D]">✓ Constructora aprobada:</span>
+                        <span className="font-medium text-[#1C1917]">{caso.constructora_info.nombre_proyecto}</span>
+                        <span className="mono-data text-[#78716C]">
+                          · {caso.constructora_info.torre_bloque} · Apto {caso.constructora_info.apartamento} ({caso.constructora_info.estado_unidad})
+                        </span>
+                        {caso.constructora_info.aprobado_por_abogado && (
+                          <span className="text-[11px] text-[#15803D]">
+                            · Aprobado por {caso.constructora_info.aprobado_por_abogado}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setVistaActiva('CHAT_PURO')}
+                        className="text-[11px] font-medium text-[#1C1917] underline"
+                      >
+                        Cambiar dueño o apto desde el Chat →
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                {/* BLOQUE 1: ALARMAS DEL TRÁMITE Y VINCULACIÓN CON CONSTRUCTORA DINÁMICA */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                  <div className="lg:col-span-7 bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-3">
+                {/* BLOQUE 1: ALARMAS ACTIVAS DEL TRÁMITE (100% del ancho sin caja invasiva de constructora) */}
+                <div className="bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-[#78716C]">
                       1. Alarmas Activas del Trámite (Documentos Faltantes, Vencimientos y Sellos)
                     </h3>
-                    <div className="space-y-2">
-                      {caso.documentos
-                        .filter((d) => d.nivel_alerta !== 'OK' || !d.aprobado_abogado)
-                        .map((d) => (
-                          <div
-                            key={d.id}
-                            onClick={() => seleccionarDocEnFicha(d)}
-                            className="p-3.5 rounded-lg bg-[#FEF3C7]/45 border border-[#FDE68A] flex items-center justify-between gap-3 cursor-pointer hover:bg-[#FEF3C7]/70"
-                          >
-                            <div className="text-xs">
-                              <div className="font-semibold text-[#B45309]">{d.nombre}</div>
-                              <div className="text-[11px] text-[#78716C]">{d.mensaje_alerta}</div>
-                            </div>
-                            <span className="px-2.5 py-1 rounded bg-white border border-[#E6E4DD] text-[11px] font-medium text-[#1C1917] shrink-0">
-                              Ver escaneo y aprobar →
-                            </span>
-                          </div>
-                        ))}
-                      {caso.documentos.every((d) => d.aprobado_abogado && d.estado === 'CARGADO') && (
-                        <div className="p-4 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0] text-xs text-[#15803D] font-medium">
-                          ✓ Todos los documentos adjuntos han sido verificados y aprobados sin alarmas pendientes.
-                        </div>
-                      )}
-                    </div>
+                    <span className="text-[11px] text-[#78716C]">
+                      💡 Para vincular a constructora, apartar apto o cambiar dueño, díselo o háblalo directamente en el Chat del Agente.
+                    </span>
                   </div>
-
-                  {/* Vinculación con Proyecto de Constructora 100% Dinámica desde data.proyectos_constructoras */}
-                  <div className="lg:col-span-5 bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-3">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-[#78716C]">
-                      ¿Pertenece a un Proyecto de Constructora?
-                    </h3>
-                    {caso.pertenece_constructora ? (
-                      <div className="p-4 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] space-y-1.5 text-xs">
-                        <div className="font-semibold text-[#15803D]">
-                          ✓ Vinculado a Proyecto de Constructora
-                        </div>
-                        <div className="text-[#1C1917] font-medium">
-                          {caso.constructora_info.nombre_proyecto}
-                        </div>
-                        <div className="mono-data text-[#78716C]">
-                          Bloque/Torre: {caso.constructora_info.torre_bloque} · Apartamento: {caso.constructora_info.apartamento} · Estado: {caso.constructora_info.estado_unidad}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-2.5 text-xs">
-                        <p className="text-[#78716C]">
-                          Selecciona el Proyecto, la Torre y el Apartamento configurados para vincular este trámite y sincronizar su estado:
-                        </p>
-                        <select
-                          value={proyectoConstructoraIdInput}
-                          onChange={(e) => {
-                            const pid = e.target.value;
-                            setProyectoConstructoraIdInput(pid);
-                            const pObj = data.proyectos_constructoras.find((p) => p.proyecto_id === pid);
-                            if (pObj && pObj.bloques_configurados[0]) {
-                              setTorreConstructoraInput(pObj.bloques_configurados[0]);
-                            }
-                          }}
-                          className="w-full border border-[#E6E4DD] rounded-lg px-3 py-2 text-xs bg-white"
+                  <div className="space-y-2">
+                    {caso.documentos
+                      .filter((d) => d.nivel_alerta !== 'OK' || !d.aprobado_abogado)
+                      .map((d) => (
+                        <div
+                          key={d.id}
+                          onClick={() => seleccionarDocEnFicha(d)}
+                          className="p-3.5 rounded-lg bg-[#FEF3C7]/45 border border-[#FDE68A] flex items-center justify-between gap-3 cursor-pointer hover:bg-[#FEF3C7]/70"
                         >
-                          {data.proyectos_constructoras.map((pr) => (
-                            <option key={pr.proyecto_id} value={pr.proyecto_id}>
-                              {pr.nombre_proyecto} ({pr.constructora})
-                            </option>
-                          ))}
-                        </select>
-                        {(() => {
-                          const proySel =
-                            data.proyectos_constructoras.find((p) => p.proyecto_id === proyectoConstructoraIdInput) ||
-                            data.proyectos_constructoras[0];
-                          const bloquesDisp = proySel ? proySel.bloques_configurados : ['Torre A'];
-                          const unidadesDisp = proySel
-                            ? proySel.unidades.filter((u) => u.bloque === torreConstructoraInput)
-                            : [];
-                          return (
-                            <div className="grid grid-cols-2 gap-2">
-                              <select
-                                value={torreConstructoraInput}
-                                onChange={(e) => setTorreConstructoraInput(e.target.value)}
-                                className="border border-[#E6E4DD] rounded-lg px-3 py-2 text-xs bg-white"
-                              >
-                                {bloquesDisp.map((b) => (
-                                  <option key={b} value={b}>
-                                    {b}
-                                  </option>
-                                ))}
-                              </select>
-                              <select
-                                value={aptoConstructoraInput}
-                                onChange={(e) => setAptoConstructoraInput(e.target.value)}
-                                className="border border-[#E6E4DD] rounded-lg px-3 py-2 text-xs bg-white"
-                              >
-                                {unidadesDisp.length > 0 ? (
-                                  unidadesDisp.map((u) => (
-                                    <option key={u.unidad_id} value={u.apartamento}>
-                                      Apto {u.apartamento} ({u.estado_dinamico})
-                                    </option>
-                                  ))
-                                ) : (
-                                  <>
-                                    <option value="101">Apto 101</option>
-                                    <option value="201">Apto 201</option>
-                                    <option value="301">Apto 301</option>
-                                    <option value="401">Apto 401</option>
-                                  </>
-                                )}
-                              </select>
-                            </div>
-                          );
-                        })()}
-                        <button
-                          onClick={() => ejecutarAccionBotonChat('VINCULAR_CONSTRUCTORA_CHAT')}
-                          className="w-full py-2 rounded-lg bg-[#1C1917] text-white text-xs font-medium"
-                        >
-                          Guardar Proyecto, Torre y Apartamento en el Trámite
-                        </button>
+                          <div className="text-xs">
+                            <div className="font-semibold text-[#B45309]">{d.nombre}</div>
+                            <div className="text-[11px] text-[#78716C]">{d.mensaje_alerta}</div>
+                          </div>
+                          <span className="px-2.5 py-1 rounded bg-white border border-[#E6E4DD] text-[11px] font-medium text-[#1C1917] shrink-0">
+                            Ver escaneo y aprobar →
+                          </span>
+                        </div>
+                      ))}
+                    {caso.documentos.every((d) => d.aprobado_abogado && d.estado === 'CARGADO') && (
+                      <div className="p-4 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0] text-xs text-[#15803D] font-medium">
+                        ✓ Todos los documentos adjuntos han sido verificados y aprobados sin alarmas pendientes.
                       </div>
                     )}
                   </div>
