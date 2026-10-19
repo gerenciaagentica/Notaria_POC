@@ -1,156 +1,136 @@
 {
-  "config_ia": {
-    "modelo_primario": "gemini-3.8-flash (Visión Multimodal Pura · Cero OCR Tradicional)",
-    "modelo_contraste_linderos": "gemini-3.1-pro-vision (Consenso Independiente)",
-    "base_transaccional": "Cloud SQL for PostgreSQL 18 (RLS + uuidv7 + AIO)",
-    "base_dinamica": "Cloud Firestore NoSQL / JSONB Dinámico"
-  },
   "catalogo_tramites": [
     {
       "tramite_id": "COMPRAVENTA_INMUEBLE",
       "nombre": "Escritura Pública de Compraventa de Inmueble",
       "plantilla_base": "VENTA PH.docx (Notaría 33 de Bogotá)",
+      "flujo_aprobacion": {
+        "exige_documentos_vigentes": true,
+        "exige_revision_linderos": true,
+        "exige_aprobacion_abogado": true,
+        "exige_aprobacion_cliente": true,
+        "exige_impresion_papel_notarial": true
+      },
       "categorias": [
         {
           "categoria_id": "PROPIEDAD_HORIZONTAL_ADMIN",
           "nombre": "Inmueble en Propiedad Horizontal (Con Administración)",
-          "pregunta_agente": "¿El apartamento/casa tiene administración de Propiedad Horizontal?",
+          "pregunta_agente": "¿El apartamento o casa paga administración de Propiedad Horizontal?",
           "documentos_adicionales": [
             "PAZ_Y_SALVO_ADMIN"
           ],
           "clausulas_afectadas": [
-            "CLÁUSULA TERCERA (Régimen PH)",
-            "CLÁUSULA DÉCIMA SEGUNDA (Paz y Salvo Administración Art. 29 Ley 675/01)"
+            "CLÁUSULA TERCERA (Régimen P.H.)",
+            "CLÁUSULA DÉCIMA SEGUNDA (Paz y Salvo Administración)"
           ],
-          "impacto_minuta": "Exige Paz y Salvo del mes de la firma e inserta escrituras de constitución y reforma del Reglamento PH."
+          "impacto_minuta": "Exige Paz y Salvo vigente del mes de la firma e incluye las escrituras del Reglamento de Propiedad Horizontal."
         },
         {
           "categoria_id": "CON_PRENDA_HIPOTECA_LEASING",
-          "nombre": "Venta con Prenda / Hipoteca Abierta o Crédito / Leasing",
-          "pregunta_agente": "¿El inmueble viene con prenda/hipoteca o pago con crédito hipotecario?",
+          "nombre": "Venta con Crédito Hipotecario / Prenda o Leasing",
+          "pregunta_agente": "¿El inmueble se paga con crédito hipotecario, leasing o tiene hipoteca?",
           "documentos_adicionales": [
-            "CARTA_CREDITO_O_PRENDA"
+            "CARTA_APROBACION_CREDITO"
           ],
           "clausulas_afectadas": [
-            "CLÁUSULA QUINTA (Precio desglosado en recursos propios + crédito)",
-            "CLÁUSULA HIPOTECA PRIMER GRADO"
+            "CLÁUSULA QUINTA (Precio con recursos propios y crédito)",
+            "CLÁUSULA DE HIPOTECA"
           ],
-          "impacto_minuta": "Genera minuta específica con prenda/hipoteca abierta y desglose financiero."
+          "impacto_minuta": "Genera la minuta específica con desglose de pago y cláusula de garantía hipotecaria."
         },
         {
           "categoria_id": "VENTA_VARIAS_PERSONAS",
-          "nombre": "Pluralidad de Vendedores o Compradores (Varios Otorgantes)",
-          "pregunta_agente": "¿En qué porcentaje de participación compran o venden las varias personas?",
+          "nombre": "Varios Vendedores o Varios Compradores",
+          "pregunta_agente": "¿En qué porcentaje compran o venden cada una de las personas?",
           "documentos_adicionales": [
-            "CEDULAS_COPROPIETARIOS_ADICIONALES"
+            "CEDULAS_TODOS_LOS_INTERVINIENTES"
           ],
           "clausulas_afectadas": [
-            "COMPARECENCIA PLURAL",
-            "CUOTAS PROINDIVISO"
+            "COMPARECENCIA CONJUNTIVA",
+            "PORCENTAJES DE PARTICIPACIÓN"
           ],
-          "impacto_minuta": "Pluraliza toda la comparecencia y exige las cédulas de todos los titulares del Certificado de Tradición."
+          "impacto_minuta": "Exige las cédulas de todos los titulares que aparecen en el Certificado de Tradición y ajusta los porcentajes."
         },
         {
           "categoria_id": "LOTE_O_CASA_SIN_ADMIN",
-          "nombre": "Casa o Lote Independiente (Sin Administración)",
-          "pregunta_agente": "¿Confirmas que el predio no paga administración?",
+          "nombre": "Casa Independiente o Lote (Sin Administración)",
+          "pregunta_agente": "¿Confirmas que el inmueble no pertenece a Propiedad Horizontal ni paga administración?",
           "documentos_adicionales": [],
           "clausulas_afectadas": [
-            "OMITE CLÁUSULA TERCERA PH",
-            "OMITE CLÁUSULA DÉCIMA SEGUNDA ADMIN"
+            "OMITE CLÁUSULA DE PROPIEDAD HORIZONTAL Y PAZ Y SALVO DE ADMINISTRACIÓN"
           ],
-          "impacto_minuta": "Exime Paz y Salvo de Administración."
-        },
-        {
-          "categoria_id": "VENTA_CON_USUFRUCTO",
-          "nombre": "Venta con Reserva de Usufructo",
-          "pregunta_agente": "�El vendedor se reserva el usufructo vitalicio?",
-          "documentos_adicionales": [
-            "ESCRITURA_USUFRUCTO"
-          ],
-          "clausulas_afectadas": [
-            "CL�USULA RESERVA USUFRUCTO"
-          ],
-          "impacto_minuta": "Desmembra nuda propiedad y usufructo"
+          "impacto_minuta": "No solicita Paz y Salvo de Administración."
         }
       ],
       "documentos_reglas": [
         {
           "codigo": "CERTIFICADO_TRADICION",
-          "nombre": "Certificado de Tradición y Libertad (SNR)",
-          "estilo_estructura": "FIJO",
+          "nombre": "Certificado de Tradición y Libertad",
+          "estilo_estructura": "FORMATO_ESTANDAR",
           "regla_vencimiento": "MAX_90_DIAS",
           "dias_maximos": 90,
           "campos_extraer": [
-            "matricula_inmobiliaria",
-            "zona_registro",
-            "direccion_predio",
-            "ultimos_propietarios_vendedores",
-            "gravamenes_vigentes",
-            "reglamento_ph",
-            "fecha_expedicion"
+            "Matrícula inmobiliaria",
+            "Dirección del inmueble",
+            "Últimos propietarios (Vendedores)",
+            "Hipotecas o embargos vigentes",
+            "Fecha de expedición"
           ],
-          "descripcion_regla": "Documento FIJO (< 3 meses / 30-90 días). Las últimas personas inscritas como dueñas se infieren automáticamente como LA PARTE VENDEDORA."
+          "descripcion_regla": "Vigencia menor a 90 días. Las últimas personas inscritas como propietarias se identifican automáticamente como Vendedores."
         },
         {
           "codigo": "CEDULA_CIUDADANIA",
           "nombre": "Cédulas de Ciudadanía (Vendedores y Compradores)",
-          "estilo_estructura": "FIJO",
+          "estilo_estructura": "FORMATO_ESTANDAR",
           "regla_vencimiento": "SIN_VENCIMIENTO",
           "campos_extraer": [
-            "numero_documento",
-            "nombres_completos",
-            "apellidos_completos",
-            "fecha_expedicion",
-            "lugar_expedicion",
-            "sexo"
+            "Número de cédula",
+            "Nombres y apellidos completos",
+            "Fecha y lugar de expedición"
           ],
-          "descripcion_regla": "Documento FIJO sin vencimiento. Quienes coinciden con el Certificado de Tradición son Vendedores; las otras cédulas son Compradores."
+          "descripcion_regla": "Documento sin vencimiento. Quienes coinciden con el Certificado de Tradición son Vendedores; las demás cédulas aportadas son Compradores."
         },
         {
           "codigo": "PAZ_Y_SALVO_ADMIN",
-          "nombre": "Paz y Salvo de Administración (Propiedad Horizontal)",
-          "estilo_estructura": "VARIABLE",
+          "nombre": "Paz y Salvo de Administración",
+          "estilo_estructura": "FORMATO_LIBRE",
           "regla_vencimiento": "FIN_DE_MES_ACTUAL",
           "alerta_dias_antes_fin_mes": 5,
           "campos_extraer": [
-            "edificio_conjunto",
-            "unidad_apartamento",
-            "administrador_firmante",
-            "fecha_expedicion",
-            "mes_vigencia"
+            "Nombre del edificio o conjunto",
+            "Número de apartamento",
+            "Administrador que firma",
+            "Mes de vigencia"
           ],
-          "descripcion_regla": "Documento VARIABLE (cada administración es diferente). Debe ser del mes de firma. Si faltan <= 5 días para acabarse el mes, genera ALERTA CRÍTICA."
+          "descripcion_regla": "Vence el último día del mes en que fue expedido. Si faltan 5 días o menos para acabarse el mes, genera alerta prioritaria."
         },
         {
           "codigo": "ESCRITURA_ANTERIOR",
-          "nombre": "Escritura Pública Anterior (Título Antecedente y Linderos)",
-          "estilo_estructura": "VARIABLE",
+          "nombre": "Escritura Pública Anterior (Para transcripción de Linderos)",
+          "estilo_estructura": "FORMATO_LIBRE",
           "regla_vencimiento": "SIN_VENCIMIENTO",
           "campos_extraer": [
-            "numero_escritura_anterior",
-            "fecha_escritura_anterior",
-            "notaria_origen",
-            "linderos_especiales",
-            "linderos_generales",
-            "area_privada",
-            "escrituras_ph"
+            "Número y fecha de escritura anterior",
+            "Notaría de origen",
+            "Área privada",
+            "Linderos especiales",
+            "Linderos generales"
           ],
-          "descripcion_regla": "Documento VARIABLE mal escaneado / con sellos. Se transcribe con DOBLE MODELO MULTIMODAL SIN OCR (Gemini 3.8 Flash Vision + Modelo 2) para auditar cada lindero."
+          "descripcion_regla": "Se transcribe íntegramente. Si algún lindero o cifra tiene sellos o manchas que generen duda, el Asistente solicita confirmación del abogado."
         },
         {
           "codigo": "RECIBOS_FISCALES_COMBO",
-          "nombre": "Impuesto Predial 2026 + Paz y Salvo IDU + Consulta VUR Hacienda",
-          "estilo_estructura": "FIJO",
+          "nombre": "Impuesto Predial del Año + Paz y Salvo Valorización IDU + Consulta VUR",
+          "estilo_estructura": "FORMATO_ESTANDAR",
           "regla_vencimiento": "MAX_30_DIAS",
           "campos_extraer": [
-            "factura_predial",
-            "avaluo_catastral",
-            "chip",
-            "idu_pin_seguridad",
-            "vur_cadena_seguridad"
+            "Número de factura Predial",
+            "Avalúo catastral",
+            "CHIP",
+            "PIN de Valorización IDU",
+            "Certificación VUR Hacienda"
           ],
-          "descripcion_regla": "Documento FIJO descargado/validado por plataforma con el CHIP y la Matrícula."
+          "descripcion_regla": "Documentos de paz y salvo fiscal requeridos para autorizar la escritura."
         }
       ]
     }
@@ -160,9 +140,9 @@
       "id": "caso-not33-00184",
       "radicado": "NOT-2026-000184",
       "tramite_id": "COMPRAVENTA_INMUEBLE",
-      "tramite_nombre": "Compraventa de Apartamento en P.H. con Prenda/Hipoteca",
+      "tramite_nombre": "Compraventa de Apartamento en Propiedad Horizontal",
       "abogado_asignado": "Andrés Villamizar",
-      "etapa_actual": "REVISION_LINDEROS",
+      "etapa_actual": "PENDIENTE_DOCUMENTOS",
       "categorias_activas": [
         "PROPIEDAD_HORIZONTAL_ADMIN",
         "VENTA_VARIAS_PERSONAS",
@@ -215,7 +195,7 @@
           "estado_civil": "Casado con sociedad conyugal vigente",
           "genero": "M",
           "porcentaje": 50,
-          "origen_inferencia": "Inferido como VENDEDOR porque aparece como propietario actual en la Anotación #14 del Certificado de Tradición (50C-1849201).",
+          "origen_inferencia": "Identificado como Vendedor por ser propietario actual en la Anotación #14 del Certificado de Tradición.",
           "cedula_cargada": true,
           "visto_bueno_cliente": false
         },
@@ -228,7 +208,7 @@
           "estado_civil": "Casada con sociedad conyugal vigente",
           "genero": "F",
           "porcentaje": 50,
-          "origen_inferencia": "Inferida como VENDEDORA porque aparece como co-propietaria en la Anotación #14 del Certificado de Tradición. ¡FALTA SU CÉDULA!",
+          "origen_inferencia": "Identificada como co-propietaria Vendedora en el Certificado de Tradición. Falta aportar su cédula.",
           "cedula_cargada": false,
           "visto_bueno_cliente": false
         },
@@ -241,7 +221,7 @@
           "estado_civil": "Soltero sin unión marital de hecho",
           "genero": "M",
           "porcentaje": 100,
-          "origen_inferencia": "Inferido como COMPRADOR porque su cédula fue aportada al expediente y no figura como dueño anterior en el Certificado de Tradición.",
+          "origen_inferencia": "Identificado como Comprador porque su cédula fue aportada al trámite y no figura como dueño anterior en el Certificado de Tradición.",
           "cedula_cargada": true,
           "visto_bueno_cliente": false
         }
@@ -251,88 +231,83 @@
           "id": "doc-1",
           "codigo_tipo": "PAZ_Y_SALVO_ADMIN",
           "nombre": "Paz y Salvo de Administración (Edificio Mirador P.H.)",
-          "estilo": "VARIABLE",
           "archivo": "paz_y_salvo_admin_apto601_noviembre.pdf",
           "fecha_expedicion": "2026-11-25",
           "fecha_vencimiento": "2026-11-30",
           "dias_restantes": 5,
           "estado": "POR_VENCER_FIN_MES",
           "nivel_alerta": "CRITICAL",
-          "mensaje_alerta": "🚨 ALERTA FIN DE MES: Faltan solo 5 días para acabarse noviembre (30 de nov). Si no se firma este mes, el Paz y Salvo vence y bloquea la firma."
+          "mensaje_alerta": "Vence a fin de mes: Faltan solo 5 días para acabarse noviembre (30 de nov). Debe firmarse antes de fin de mes."
         },
         {
           "id": "doc-2",
           "codigo_tipo": "CERTIFICADO_TRADICION",
           "nombre": "Certificado de Tradición y Libertad (50C-1849201)",
-          "estilo": "FIJO",
           "archivo": "certificado_tradicion_50C1849201.pdf",
           "fecha_expedicion": "2026-11-18",
           "fecha_vencimiento": "2027-02-16",
           "dias_restantes": 83,
           "estado": "VERIFICADO",
           "nivel_alerta": "OK",
-          "mensaje_alerta": "Vigente (< 3 meses). Últimos dueños detectados como Vendedores: Carlos Mejía y Mónica Pérez."
+          "mensaje_alerta": "Vigente (83 días restantes). Propietarios actuales: Carlos Mejía y Mónica Pérez."
         },
         {
           "id": "doc-3",
           "codigo_tipo": "CEDULA_CIUDADANIA",
-          "nombre": "Cédulas de Ciudadanía de las Partes (2 de 3 cargadas)",
-          "estilo": "FIJO",
+          "nombre": "Cédulas de Ciudadanía de las Partes (2 de 3 recibidas)",
           "archivo": "cedulas_carlos_y_jorge.pdf",
           "fecha_vencimiento": "SIN_VENCIMIENTO",
           "estado": "FALTA_DOCUMENTO",
           "nivel_alerta": "CRITICAL",
-          "mensaje_alerta": "❌ PENDIENTE: Falta la Cédula de Ciudadanía de la vendedora MÓNICA PATRICIA PÉREZ GÓMEZ (C.C. 52.110.900)."
+          "mensaje_alerta": "Pendiente: Falta la Cédula de Ciudadanía de la vendedora MÓNICA PATRICIA PÉREZ GÓMEZ (C.C. 52.110.900)."
         },
         {
           "id": "doc-4",
           "codigo_tipo": "ESCRITURA_ANTERIOR",
-          "nombre": "Escritura Pública Anterior No. 1.420 de 2014 Notaría 19 (Con sellos)",
-          "estilo": "VARIABLE",
+          "nombre": "Escritura Pública Anterior No. 1.420 de 2014 Notaría 19",
           "archivo": "escritura_1420_2014_escaneo_sellos.pdf",
           "fecha_vencimiento": "SIN_VENCIMIENTO",
           "estado": "REVISION_LINDEROS",
           "nivel_alerta": "WARNING",
-          "mensaje_alerta": "⚠️ 2 fragmentos en Linderos tienen sello superpuesto / mancha y requieren verificación del abogado."
+          "mensaje_alerta": "2 puntos de los linderos tienen sello superpuesto y requieren confirmación del abogado."
         },
         {
           "id": "doc-5",
           "codigo_tipo": "IDU_Y_VUR_HACIENDA",
-          "nombre": "Paz y Salvo IDU + Reporte VUR Hacienda + Predial 2026",
-          "estilo": "FIJO",
+          "nombre": "Impuesto Predial 2026 + Paz y Salvo IDU + VUR Hacienda",
           "archivo": "combo_fiscales_AAA0142BCDE.pdf",
           "fecha_expedicion": "2026-11-20",
           "fecha_vencimiento": "2026-12-20",
           "dias_restantes": 25,
           "estado": "VERIFICADO",
           "nivel_alerta": "OK",
-          "mensaje_alerta": "Predio al día en Impuesto Predial 2026, Valorización IDU y VUR Hacienda."
+          "mensaje_alerta": "Inmueble al día en Impuesto Predial, Valorización IDU y VUR Hacienda."
         }
       ],
       "discrepancias_linderos": [
         {
           "id": "lind-1",
           "campo": "Área Privada del Apartamento 601 (Cláusula Primera)",
-          "motivo_duda": "Sello húmedo azul de la Notaría 19 cae exactamente sobre el segundo decimal de la cifra (88.5_).",
+          "motivo_duda": "Un sello húmedo de la Notaría 19 cae sobre el segundo decimal de la cifra (88.5_).",
           "lectura_modelo_a": "OCHENTA Y OCHO PUNTO CINCUENTA Y TRES (88.53) METROS CUADRADOS",
           "confianza_a": 98.4,
-          "argumento_a": "Gemini 3.8 Flash Vision (Sin OCR): Al separar el canal azul del sello y cruzar con el texto en letras (\"CINCUENTA Y TRES\") y Catastro, es 88.53 m².",
+          "argumento_a": "Coincide con el texto en letras (\"CINCUENTA Y TRES\") de la misma escritura y con el área de Catastro.",
           "lectura_modelo_b": "OCHENTA Y OCHO PUNTO CINCUENTA Y OCHO (88.58) METROS CUADRADOS",
           "confianza_b": 61,
-          "argumento_b": "Modelo 2 (Contraste): El borde del sello azul sobre el \"3\" aparenta un \"8\".",
+          "argumento_b": "El borde del sello azul sobre el número \"3\" aparenta un \"8\".",
           "valor_seleccionado": "OCHENTA Y OCHO PUNTO CINCUENTA Y TRES (88.53) METROS CUADRADOS",
           "estado": "PENDIENTE_HUMANO"
         },
         {
           "id": "lind-2",
           "campo": "Lindero Especial ORIENTE (Cláusula Primera)",
-          "motivo_duda": "Fotocopia antigua con desgaste de tóner en la palabra TREINTA y en el dígito (9._0 mts).",
+          "motivo_duda": "Desgaste de impresión en la palabra TREINTA y en el dígito (9._0 mts).",
           "lectura_modelo_a": "nueve metros treinta centímetros (9.30 mts)",
           "confianza_a": 97.1,
-          "argumento_a": "Gemini 3.8 Flash Vision: Por morfología de letras y simetría geométrica con el Lindero OCCIDENTE opuesto (9.30 mts), es 9.30 mts.",
+          "argumento_a": "Coincide con la medida del lindero opuesto OCCIDENTE (9.30 mts) y el trazo de la palabra TREINTA.",
           "lectura_modelo_b": "nueve metros ochenta centímetros (9.80 mts)",
           "confianza_b": 54.5,
-          "argumento_b": "Modelo 2 (Contraste): Mancha vertical sobre el número 3 genera duda entre 9.30 y 9.80.",
+          "argumento_b": "Mancha vertical sobre el número 3 genera duda entre 9.30 y 9.80.",
           "valor_seleccionado": "nueve metros treinta centímetros (9.30 mts)",
           "estado": "PENDIENTE_HUMANO"
         }
@@ -353,258 +328,64 @@
         {
           "id": "m-1",
           "emisor": "ABOGADO",
-          "autor": "Dr. Andrés Villamizar (Abogado Notaría)",
+          "autor": "Andrés Villamizar · Abogado",
           "hora": "09:40 AM",
-          "texto": "Hola, va a ser una minuta de compraventa de un apartamento con prenda/hipoteca. Adjunto Certificado de Tradición, escritura anterior escaneada, dos cédulas y el paz y salvo de administración."
+          "texto": "Hola, necesito elaborar la escritura de compraventa del Apartamento 601 (Edificio Mirador del Parque) con hipoteca. Adjunto el Certificado de Tradición, la escritura anterior, dos cédulas y el paz y salvo de administración."
         },
         {
           "id": "m-2",
-          "emisor": "AGENTE_GEMINI_3_8",
-          "autor": "Agente Notarial · Gemini 3.8 Flash (Visión Multimodal Nativa)",
+          "emisor": "ASISTENTE",
+          "autor": "Asistente Notarial",
           "hora": "09:41 AM",
-          "texto": "He leído todos los documentos con Visión Multimodal (sin OCR tradicional) y configuré el trámite COMPRAVENTA con las categorías: (1) Propiedad Horizontal con Administración, (2) Pluralidad de Vendedores y (3) Con Prenda / Hipoteca.",
+          "texto": "He revisado los documentos del Apartamento 601 y preparé el borrador de Compraventa (Propiedad Horizontal con Hipoteca). Antes de aprobar el trámite, tenemos 3 puntos por resolver:",
           "hallazgos": [
-            "Cruce Vendedores vs. Compradores: En la Anotación #14 del Certificado de Tradición (50C-1849201) los últimos dueños son CARLOS ARTURO MEJÍA (C.C. 79.451.200) y MÓNICA PATRICIA PÉREZ (C.C. 52.110.900) -> Asignados como VENDEDORES.",
-            "La otra cédula aportada (JORGE ELIÉCER MOSQUERA, C.C. 80.123.456) fue asignada automáticamente como COMPRADOR.",
-            "Descargué por plataforma el IDU Valorización (PIN IDU-2026-99481023) y el reporte VUR Hacienda (SHD-VUR-2026-8841209-OK)."
+            "Vendedores identificados en el Certificado de Tradición: Carlos Arturo Mejía (50%) y Mónica Patricia Pérez (50%).",
+            "Comprador identificado por la cédula adicional: Jorge Eliécer Mosquera (100%).",
+            "Impuesto Predial, Valorización IDU y VUR Hacienda validados y al día."
           ],
           "alertas_rojas": [
-            "🚨 ALERTA FIN DE MES (Paz y Salvo Administración): El Paz y Salvo del Edificio Mirador P.H. fue expedido en noviembre y faltan SOLO 5 DÍAS para que se acabe el mes (30 de noviembre). ¡Debemos firmar antes del 30 o vencerá!",
-            "❌ FALTA CÉDULA DE VENDEDORA: Solo subiste la cédula de Carlos Mejía. Hace falta la cédula de MÓNICA PATRICIA PÉREZ GÓMEZ (C.C. 52.110.900).",
-            "⚠️ REVISIÓN DE LINDEROS (2 Dudas por Sello): La escritura anterior tiene un sello notarial azul sobre el área privada (88.53 vs 88.58 m²) y desgaste en el lindero Oriente (9.30 vs 9.80 mts)."
+            "Falta la cédula de la vendedora Mónica Patricia Pérez Gómez (C.C. 52.110.900).",
+            "El Paz y Salvo de Administración vence en 5 días (30 de noviembre, cierre de mes).",
+            "Hay 2 cifras con sello en los linderos de la escritura anterior que requieren tu confirmación."
           ],
           "preguntas_pendientes": [
-            "¿El comprador Jorge Eliécer Mosquera afecta el apartamento a Vivienda Familiar (Ley 258/96)?",
-            "¿Le envío link al cliente para que suba la cédula faltante de Mónica Pérez?"
+            "¿Deseas adjuntar ahora la cédula de Mónica Pérez y confirmar los 2 linderos para habilitar la aprobación del trámite?"
+          ],
+          "acciones_sugeridas": [
+            {
+              "tipo": "SUBIR_CEDULA_MONICA",
+              "etiqueta": "1. Adjuntar Cédula de Mónica Pérez"
+            },
+            {
+              "tipo": "ABRIR_LINDEROS",
+              "etiqueta": "2. Revisar y Aprobar Linderos (2 dudas)"
+            },
+            {
+              "tipo": "VER_DOCUMENTOS",
+              "etiqueta": "Ver Estado del Trámite"
+            }
           ]
         }
       ],
       "bitacora": [
         {
           "id": "ev-1",
-          "fecha": "19/10/2026 05:40:12",
-          "actor": "Abogado · Andrés Villamizar",
-          "etapa": "SOLICITADO",
-          "detalle": "Apertura del trámite por Chat Agéntico con carga de paquete documental."
+          "fecha": "19/10/2026 09:40",
+          "actor": "Andrés Villamizar",
+          "etapa": "Recepción",
+          "detalle": "Inicio del trámite de compraventa con carga de documentos."
         },
         {
           "id": "ev-2",
-          "fecha": "19/10/2026 05:40:28",
-          "actor": "Gemini 3.8 Flash Vision",
-          "etapa": "EN_VERIFICACION",
-          "detalle": "Inferencia automática completada: Vendedores deducidos desde Certificado de Tradición y Comprador por descarte de cédula."
-        },
-        {
-          "id": "ev-3",
-          "fecha": "19/10/2026 05:40:45",
-          "actor": "Motor Determinístico Vigencias",
-          "etapa": "EN_VERIFICACION",
-          "detalle": "Alerta Crítica disparada: Paz y Salvo de Administración a 5 días del cierre de mes."
-        },
-        {
-          "id": "ev-4",
-          "fecha": "19/10/2026 05:41:02",
-          "actor": "Consenso Doble Modelo IA (Sin OCR)",
-          "etapa": "REVISION_LINDEROS",
-          "detalle": "Transcripción de Escritura 1420/2014 finalizada con 96.8% de coincidencia. Se marcan 2 recortes de linderos con sello para revisión del abogado."
+          "fecha": "19/10/2026 09:41",
+          "actor": "Asistente Notarial",
+          "etapa": "Revisión Documental",
+          "detalle": "Identificación de vendedores y compradores, alerta de fin de mes en Paz y Salvo y detección de 2 sellos en linderos."
         }
       ]
     }
   ],
   "proyectos_constructoras": [
-    {
-      "proyecto_id": "proy-1792407321595",
-      "nombre_proyecto": "Altos de Rosales P.H.",
-      "constructora": "Constructora Bol�var S.A.",
-      "nit": "900.554.112-9",
-      "direccion": "Bogotá D.C.",
-      "bloques_configurados": [
-        "Torre A",
-        "Torre B",
-        "Torre C"
-      ],
-      "apartamentos_por_bloque": 4,
-      "estados_personalizados": [
-        "Sin comprador",
-        "Documentos pendientes",
-        "En verificación IA",
-        "Minuta lista / Visto bueno",
-        "En impresión",
-        "Firmada",
-        "Registrada"
-      ],
-      "documentos_matriz_heredables": [
-        {
-          "nombre": "Certificado de Tradición Mayor Extensión",
-          "vigencia": "Vigente (< 3 meses)"
-        },
-        {
-          "nombre": "Escritura Constitución Reglamento P.H.",
-          "vigencia": "Permanente"
-        }
-      ],
-      "unidades": [
-        {
-          "unidad_id": "A-101",
-          "bloque": "Torre A",
-          "apartamento": "101",
-          "tipo_apto": "TIPO_B",
-          "area_m2": 68,
-          "valor_venta": 365000000,
-          "estado_dinamico": "Firmada",
-          "tiene_alerta_vencimiento": false,
-          "documentos_recibidos": 7,
-          "documentos_totales": 7,
-          "minuta_firmada": true
-        },
-        {
-          "unidad_id": "A-201",
-          "bloque": "Torre A",
-          "apartamento": "201",
-          "tipo_apto": "TIPO_A",
-          "area_m2": 84,
-          "valor_venta": 445000000,
-          "estado_dinamico": "Documentos pendientes",
-          "tiene_alerta_vencimiento": true,
-          "alerta_detalle": "Paz y Salvo Admin vence en 5 días (Fin de mes)",
-          "documentos_recibidos": 3,
-          "documentos_totales": 7,
-          "minuta_firmada": false
-        },
-        {
-          "unidad_id": "A-301",
-          "bloque": "Torre A",
-          "apartamento": "301",
-          "tipo_apto": "TIPO_B",
-          "area_m2": 68,
-          "valor_venta": 365000000,
-          "estado_dinamico": "Sin comprador",
-          "tiene_alerta_vencimiento": false,
-          "documentos_recibidos": 0,
-          "documentos_totales": 7,
-          "minuta_firmada": false
-        },
-        {
-          "unidad_id": "A-401",
-          "bloque": "Torre A",
-          "apartamento": "401",
-          "tipo_apto": "TIPO_A",
-          "area_m2": 84,
-          "valor_venta": 445000000,
-          "estado_dinamico": "Sin comprador",
-          "tiene_alerta_vencimiento": false,
-          "documentos_recibidos": 0,
-          "documentos_totales": 7,
-          "minuta_firmada": false
-        },
-        {
-          "unidad_id": "B-101",
-          "bloque": "Torre B",
-          "apartamento": "101",
-          "tipo_apto": "TIPO_B",
-          "area_m2": 68,
-          "valor_venta": 365000000,
-          "estado_dinamico": "Firmada",
-          "tiene_alerta_vencimiento": false,
-          "documentos_recibidos": 7,
-          "documentos_totales": 7,
-          "minuta_firmada": true
-        },
-        {
-          "unidad_id": "B-201",
-          "bloque": "Torre B",
-          "apartamento": "201",
-          "tipo_apto": "TIPO_A",
-          "area_m2": 84,
-          "valor_venta": 445000000,
-          "estado_dinamico": "Documentos pendientes",
-          "tiene_alerta_vencimiento": true,
-          "alerta_detalle": "Paz y Salvo Admin vence en 5 días (Fin de mes)",
-          "documentos_recibidos": 3,
-          "documentos_totales": 7,
-          "minuta_firmada": false
-        },
-        {
-          "unidad_id": "B-301",
-          "bloque": "Torre B",
-          "apartamento": "301",
-          "tipo_apto": "TIPO_B",
-          "area_m2": 68,
-          "valor_venta": 365000000,
-          "estado_dinamico": "Sin comprador",
-          "tiene_alerta_vencimiento": false,
-          "documentos_recibidos": 0,
-          "documentos_totales": 7,
-          "minuta_firmada": false
-        },
-        {
-          "unidad_id": "B-401",
-          "bloque": "Torre B",
-          "apartamento": "401",
-          "tipo_apto": "TIPO_A",
-          "area_m2": 84,
-          "valor_venta": 445000000,
-          "estado_dinamico": "Sin comprador",
-          "tiene_alerta_vencimiento": false,
-          "documentos_recibidos": 0,
-          "documentos_totales": 7,
-          "minuta_firmada": false
-        },
-        {
-          "unidad_id": "C-101",
-          "bloque": "Torre C",
-          "apartamento": "101",
-          "tipo_apto": "TIPO_B",
-          "area_m2": 68,
-          "valor_venta": 365000000,
-          "estado_dinamico": "Firmada",
-          "tiene_alerta_vencimiento": false,
-          "documentos_recibidos": 7,
-          "documentos_totales": 7,
-          "minuta_firmada": true
-        },
-        {
-          "unidad_id": "C-201",
-          "bloque": "Torre C",
-          "apartamento": "201",
-          "tipo_apto": "TIPO_A",
-          "area_m2": 84,
-          "valor_venta": 445000000,
-          "estado_dinamico": "Documentos pendientes",
-          "tiene_alerta_vencimiento": true,
-          "alerta_detalle": "Paz y Salvo Admin vence en 5 días (Fin de mes)",
-          "documentos_recibidos": 3,
-          "documentos_totales": 7,
-          "minuta_firmada": false
-        },
-        {
-          "unidad_id": "C-301",
-          "bloque": "Torre C",
-          "apartamento": "301",
-          "tipo_apto": "TIPO_B",
-          "area_m2": 68,
-          "valor_venta": 365000000,
-          "estado_dinamico": "Sin comprador",
-          "tiene_alerta_vencimiento": false,
-          "documentos_recibidos": 0,
-          "documentos_totales": 7,
-          "minuta_firmada": false
-        },
-        {
-          "unidad_id": "C-401",
-          "bloque": "Torre C",
-          "apartamento": "401",
-          "tipo_apto": "TIPO_A",
-          "area_m2": 84,
-          "valor_venta": 445000000,
-          "estado_dinamico": "Sin comprador",
-          "tiene_alerta_vencimiento": false,
-          "documentos_recibidos": 0,
-          "documentos_totales": 7,
-          "minuta_firmada": false
-        }
-      ]
-    },
     {
       "proyecto_id": "proy-torres-parque",
       "nombre_proyecto": "Torres del Parque Reservado P.H.",
@@ -620,8 +401,8 @@
       "estados_personalizados": [
         "Sin comprador",
         "Documentos pendientes",
-        "En verificación IA",
-        "Minuta lista / Visto bueno",
+        "En revisión",
+        "Minuta aprobada",
         "En impresión",
         "Firmada",
         "Registrada"
@@ -629,11 +410,11 @@
       "documentos_matriz_heredables": [
         {
           "nombre": "Certificado de Tradición Lote Matriz (50N-2099182)",
-          "vigencia": "Vigente (< 3 meses)"
+          "vigencia": "Vigente (< 90 días)"
         },
         {
-          "nombre": "Escritura Pública Constitución Reglamento P.H. No. 0890 de 2026",
-          "vigencia": "Permanente (Linderos verificados con Doble IA)"
+          "nombre": "Escritura Pública Reglamento P.H. No. 0890 de 2026",
+          "vigencia": "Permanente (Linderos verificados)"
         },
         {
           "nombre": "Cámara de Comercio y RUT Constructora Altos del Peñón S.A.",
@@ -699,7 +480,7 @@
           "comprador_nombre": "Sandra Milena Ocampo",
           "comprador_cc": "53.112.890",
           "forma_pago": "Leasing Bancolombia",
-          "estado_dinamico": "Minuta lista / Visto bueno",
+          "estado_dinamico": "Minuta aprobada",
           "tiene_alerta_vencimiento": true,
           "alerta_detalle": "Paz y Salvo Admin vence en 5 días (Fin de mes)",
           "documentos_recibidos": 7,
@@ -716,7 +497,7 @@
           "comprador_nombre": "Yenny Paola Beltrán",
           "comprador_cc": "53.440.317",
           "forma_pago": "Crédito Hipotecario",
-          "estado_dinamico": "Minuta lista / Visto bueno",
+          "estado_dinamico": "Minuta aprobada",
           "tiene_alerta_vencimiento": false,
           "documentos_recibidos": 7,
           "documentos_totales": 7,
@@ -732,7 +513,7 @@
           "comprador_nombre": "Ricardo Alfonso Neira",
           "comprador_cc": "79.310.445",
           "forma_pago": "Crédito Hipotecario",
-          "estado_dinamico": "En verificación IA",
+          "estado_dinamico": "En revisión",
           "tiene_alerta_vencimiento": false,
           "documentos_recibidos": 6,
           "documentos_totales": 7,
@@ -747,7 +528,7 @@
           "valor_venta": 432000000,
           "comprador_nombre": "Paola Andrea Cifuentes Rojas",
           "comprador_cc": "53.889.560",
-          "forma_pago": "Leasing Habitacional Scotiabank Colpatria",
+          "forma_pago": "Leasing Habitacional Scotiabank",
           "estado_dinamico": "Documentos pendientes",
           "tiene_alerta_vencimiento": true,
           "alerta_detalle": "Falta Carta de Leasing + Paz y Salvo vence a fin de mes (5 días)",
@@ -810,7 +591,7 @@
           "comprador_nombre": "Juan Sebastián Mora",
           "comprador_cc": "1.020.774.120",
           "forma_pago": "Crédito Hipotecario",
-          "estado_dinamico": "En verificación IA",
+          "estado_dinamico": "En revisión",
           "tiene_alerta_vencimiento": true,
           "alerta_detalle": "Certificado Tradición próximo a cumplir 90 días",
           "documentos_recibidos": 7,
@@ -827,7 +608,7 @@
           "comprador_nombre": "Natalia Valderrama",
           "comprador_cc": "1.015.412.900",
           "forma_pago": "Leasing Habitacional",
-          "estado_dinamico": "En verificación IA",
+          "estado_dinamico": "En revisión",
           "tiene_alerta_vencimiento": false,
           "documentos_recibidos": 6,
           "documentos_totales": 7,
@@ -915,7 +696,7 @@
           "comprador_nombre": "Óscar Mauricio León",
           "comprador_cc": "79.654.321",
           "forma_pago": "Crédito Hipotecario",
-          "estado_dinamico": "Minuta lista / Visto bueno",
+          "estado_dinamico": "Minuta aprobada",
           "tiene_alerta_vencimiento": false,
           "documentos_recibidos": 7,
           "documentos_totales": 7,
@@ -931,7 +712,7 @@
           "comprador_nombre": "Claudia Patricia Soler",
           "comprador_cc": "52.334.890",
           "forma_pago": "Crédito Hipotecario",
-          "estado_dinamico": "Minuta lista / Visto bueno",
+          "estado_dinamico": "Minuta aprobada",
           "tiene_alerta_vencimiento": false,
           "documentos_recibidos": 7,
           "documentos_totales": 7,
@@ -947,7 +728,7 @@
           "comprador_nombre": "Germán Darío Vargas",
           "comprador_cc": "79.110.882",
           "forma_pago": "Contado",
-          "estado_dinamico": "En verificación IA",
+          "estado_dinamico": "En revisión",
           "tiene_alerta_vencimiento": false,
           "documentos_recibidos": 6,
           "documentos_totales": 7,
