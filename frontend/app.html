@@ -8,6 +8,7 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
@@ -44,6 +45,10 @@
 
     <script type="text/babel">
       const { useState, useEffect, useRef } = React;
+      if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
 
       function App() {
         // Todos los Hooks en el bloque superior (Prevención Error #310)
@@ -60,16 +65,48 @@
         // Interacción en el Chat
         const [mensajeInput, setMensajeInput] = useState('');
         const [notificacion, setNotificacion] = useState('');
+        const [errorAlerta, setErrorAlerta] = useState('');
+
+        // Cargador Real de Archivos desde el Computador (<input type="file">)
+        const [modalSubidaAbierto, setModalSubidaAbierto] = useState(false);
+        const [modoAperturaNuevoTramite, setModoAperturaNuevoTramite] = useState(false);
+        const [archivoSeleccionadoNombre, setArchivoSeleccionadoNombre] = useState('');
+        const [archivoDataUrl, setArchivoDataUrl] = useState('');
+        const [archivoTipoMime, setArchivoTipoMime] = useState('');
+        const [archivoTextoExtraido, setArchivoTextoExtraido] = useState('');
+        const [leyendoArchivo, setLeyendoArchivo] = useState(false);
+        const [tipoDocSubida, setTipoDocSubida] = useState('CERTIFICADO_TRADICION');
+        const [tramiteIdApertura, setTramiteIdApertura] = useState('TRM-01-COMPRAVENTA');
+        const [chipSubida, setChipSubida] = useState('');
+        const [matriculaSubida, setMatriculaSubida] = useState('');
+        const [cedulaCatastralSubida, setCedulaCatastralSubida] = useState('');
+        const [direccionSubida, setDireccionSubida] = useState('');
+        const [nombrePropietarioSubida, setNombrePropietarioSubida] = useState('');
+        const [cedulaSubida, setCedulaSubida] = useState('');
+        const [correoSubida, setCorreoSubida] = useState('');
+        const [rolParteSubida, setRolParteSubida] = useState('VENDEDOR');
+        const [parteDestinoIdSubida, setParteDestinoIdSubida] = useState('');
+        const [docDestinoIdSubida, setDocDestinoIdSubida] = useState('');
 
         // Documento seleccionado dentro de la Ficha del Trámite para ver su Imagen Escaneada y Corregir/Aprobar
         const [docSeleccionadoId, setDocSeleccionadoId] = useState('doc-6');
         const [camposEditablesDoc, setCamposEditablesDoc] = useState([]);
 
-        // Estados de edición de Partes e Impresión en la Ficha
+        // Estados de edición de Partes, Correos e Impresión en la Ficha
         const [hojasPapel, setHojasPapel] = useState('AA-4910201 a AA-4910206');
         const [numEscritura, setNumEscritura] = useState('3.418 de 2026');
+        const [proyectoConstructoraIdInput, setProyectoConstructoraIdInput] = useState('');
         const [torreConstructoraInput, setTorreConstructoraInput] = useState('Torre A');
         const [aptoConstructoraInput, setAptoConstructoraInput] = useState('401');
+
+        // Formulario para agregar un nuevo otorgante (Vendedor / Comprador) en la Ficha
+        const [mostrarFormNuevaParte, setMostrarFormNuevaParte] = useState(false);
+        const [nuevaParteRol, setNuevaParteRol] = useState('COMPRADOR');
+        const [nuevaParteNombre, setNuevaParteNombre] = useState('');
+        const [nuevaParteCedula, setNuevaParteCedula] = useState('');
+        const [nuevaParteCorreo, setNuevaParteCorreo] = useState('');
+        const [nuevaParteEstadoCivil, setNuevaParteEstadoCivil] = useState('Soltero(a)');
+        const [nuevaPartePorcentaje, setNuevaPartePorcentaje] = useState(100);
 
         // Estados de Configuración -> 1. Nuevo Trámite con ID y Subcategorías
         const [tramiteIdxSelec, setTramiteIdxSelec] = useState(0);
@@ -105,10 +142,18 @@
         const [nuevoProyAptos, setNuevoProyAptos] = useState(6);
 
         const chatEndRef = useRef(null);
+        const fileInputRef = useRef(null);
 
         const mostrarAviso = (txt) => {
+          setErrorAlerta('');
           setNotificacion(txt);
-          setTimeout(() => setNotificacion(''), 4000);
+          setTimeout(() => setNotificacion(''), 4500);
+        };
+
+        const mostrarError = (txt) => {
+          setNotificacion('');
+          setErrorAlerta(txt);
+          setTimeout(() => setErrorAlerta(''), 6000);
         };
 
         const cargarEstado = async () => {
@@ -120,6 +165,9 @@
             if (c?.aprobaciones) {
               setHojasPapel(c.aprobaciones.hojas_papel_notarial || 'AA-4910201 a AA-4910206');
               setNumEscritura(c.aprobaciones.numero_escritura_asignada || '3.418 de 2026');
+            }
+            if (json.proyectos_constructoras?.length && !proyectoConstructoraIdInput) {
+              setProyectoConstructoraIdInput(json.proyectos_constructoras[0].proyecto_id);
             }
             if (c?.documentos?.length) {
               const actual = c.documentos.find((d) => d.id === docSeleccionadoId) || c.documentos[0];
@@ -142,6 +190,162 @@
             chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
           }
         }, [data?.caso_activo?.mensajes_chat?.length, vistaActiva]);
+
+        // Extracción real de texto de PDF o archivo en el navegador
+        const extraerTextoDeArchivoReal = async (file) => {
+          try {
+            if (file.type === 'application/pdf' && window.pdfjsLib) {
+              const arrayBuffer = await file.arrayBuffer();
+              const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+              let fullText = '';
+              const maxPages = Math.min(pdf.numPages, 8);
+              for (let i = 1; i <= maxPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                const pageText = content.items.map((it) => it.str).join(' ');
+                fullText += pageText + '\n';
+              }
+              return fullText.trim();
+            }
+            if (file.type.startsWith('text/')) {
+              return await file.text();
+            }
+          } catch (err) {
+            console.error('Error leyendo texto de PDF:', err);
+          }
+          return '';
+        };
+
+        const analizarTextoParaAutocompletar = (texto, nombreArchivo) => {
+          const fuente = `${texto || ''} ${nombreArchivo || ''}`;
+          const chipM = fuente.match(/AAA[0-9A-Z]{7,8}/i);
+          const matM =
+            fuente.match(/50[A-Z]-[0-9]{4,9}(?:-[0-9]{1,4})?/i) ||
+            fuente.match(/(?:MATR[IÍ]CULA|FOLIO)[^0-9A-Z]{0,15}([0-9A-Z]{2,4}-[0-9]{4,9})/i);
+          const catM = fuente.match(/\b\d{14,20}\b/);
+          const dirM =
+            fuente.match(/(?:DIRECCI[OÓ]N(?:\s+DEL\s+INMUEBLE)?|UBICACI[OÓ]N)[:\s]+([^\n\r]{8,85})/i) ||
+            fuente.match(/((?:CALLE|CARRERA|DIAGONAL|TRANSVERSAL|AVENIDA|CL|KR|CR)\s+[0-9A-Z#\-.\s]{6,60})/i);
+          const cedulas = Array.from(
+            new Set(
+              (fuente.match(/\b\d{1,3}(?:\.\d{3}){2}\b|\b\d{7,10}\b/g) || []).filter(
+                (n) => n.replace(/\./g, '').length >= 7 && n.replace(/\./g, '').length <= 10
+              )
+            )
+          );
+          const propM = fuente.match(/(?:A:|PROPIETARIO(?:S)?|TITULAR(?:ES)?|DE:|APELLIDOS Y NOMBRES)[:\s]+([A-ZÁÉÍÓÚÑ\s]{5,55})/i);
+
+          if (chipM) setChipSubida(chipM[0].toUpperCase());
+          if (matM) setMatriculaSubida((matM[1] || matM[0]).toUpperCase());
+          if (catM) setCedulaCatastralSubida(catM[0]);
+          if (dirM) setDireccionSubida((dirM[1] || dirM[0]).trim());
+          if (cedulas[0] && !cedulaSubida) setCedulaSubida(cedulas[0]);
+          if (propM && !nombrePropietarioSubida) setNombrePropietarioSubida(propM[1].trim().toUpperCase());
+        };
+
+        const abrirSelectorArchivoReal = (opciones = {}) => {
+          setArchivoSeleccionadoNombre('');
+          setArchivoDataUrl('');
+          setArchivoTipoMime('');
+          setArchivoTextoExtraido('');
+          setModoAperturaNuevoTramite(Boolean(opciones.abrirTramiteNuevo));
+          setTipoDocSubida(opciones.tipoDoc || (opciones.abrirTramiteNuevo ? 'CERTIFICADO_TRADICION' : 'CERTIFICADO_TRADICION'));
+          setParteDestinoIdSubida(opciones.parteId || '');
+          setDocDestinoIdSubida(opciones.documentoId || '');
+          setChipSubida('');
+          setMatriculaSubida('');
+          setCedulaCatastralSubida('');
+          setDireccionSubida('');
+          setNombrePropietarioSubida(opciones.nombreSugerido || '');
+          setCedulaSubida(opciones.cedulaSugerida || '');
+          setCorreoSubida(opciones.correoSugerido || '');
+          setModalSubidaAbierto(true);
+          setTimeout(() => {
+            if (fileInputRef.current) fileInputRef.current.click();
+          }, 80);
+        };
+
+        const manejarSeleccionArchivoInput = async (e) => {
+          const file = e.target.files && e.target.files[0];
+          if (!file) return;
+          setLeyendoArchivo(true);
+          setArchivoSeleccionadoNombre(file.name);
+          setArchivoTipoMime(file.type || 'application/pdf');
+
+          const fnameLow = file.name.toLowerCase();
+          if (!modoAperturaNuevoTramite) {
+            if (fnameLow.includes('cedula') || fnameLow.includes('cédula') || fnameLow.includes('cc')) {
+              setTipoDocSubida('CEDULA_CIUDADANIA');
+            } else if (fnameLow.includes('paz') || fnameLow.includes('salvo') || fnameLow.includes('admin')) {
+              setTipoDocSubida('PAZ_Y_SALVO_ADMIN');
+            } else if (fnameLow.includes('escritura') || fnameLow.includes('minuta')) {
+              setTipoDocSubida('ESCRITURA_ANTERIOR');
+            } else if (fnameLow.includes('tradicion') || fnameLow.includes('tradición') || fnameLow.includes('libertad') || fnameLow.includes('snr')) {
+              setTipoDocSubida('CERTIFICADO_TRADICION');
+            }
+          }
+
+          const reader = new FileReader();
+          reader.onload = async (ev) => {
+            const dataUrl = ev.target.result;
+            setArchivoDataUrl(dataUrl);
+            const texto = await extraerTextoDeArchivoReal(file);
+            setArchivoTextoExtraido(texto);
+            analizarTextoParaAutocompletar(texto, file.name);
+            setLeyendoArchivo(false);
+          };
+          reader.readAsDataURL(file);
+        };
+
+        const confirmarSubidaArchivoReal = async (e) => {
+          e.preventDefault();
+          if (!archivoSeleccionadoNombre) {
+            mostrarError('Por favor selecciona un archivo real (PDF o Imagen) desde tu computador.');
+            return;
+          }
+          const res = await fetch('/api/documento/subir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              accion_apertura: modoAperturaNuevoTramite ? 'ABRIR_TRAMITE_NUEVO' : 'ADJUNTAR_A_TRAMITE_ACTIVO',
+              abrir_tramite_nuevo: modoAperturaNuevoTramite,
+              tramite_id: tramiteIdApertura,
+              codigo_tipo: modoAperturaNuevoTramite ? 'CERTIFICADO_TRADICION' : tipoDocSubida,
+              archivo_nombre: archivoSeleccionadoNombre,
+              archivo_data_url: archivoDataUrl,
+              tipo_mime: archivoTipoMime,
+              texto_extraido: archivoTextoExtraido,
+              chip: chipSubida,
+              matricula: matriculaSubida,
+              cedula_catastral: cedulaCatastralSubida,
+              direccion: direccionSubida,
+              nombre_propietario: nombrePropietarioSubida,
+              cedula: cedulaSubida,
+              correo_electronico: correoSubida,
+              rol_parte: rolParteSubida,
+              parte_id: parteDestinoIdSubida,
+              documento_id: docDestinoIdSubida
+            })
+          });
+          const json = await res.json();
+          if (!res.ok || json.ok === false) {
+            mostrarError(json.error || 'No se pudo procesar el documento.');
+            return;
+          }
+          setModalSubidaAbierto(false);
+          await cargarEstado();
+          if (json.duplicado_bloqueado) {
+            mostrarAviso(`⚠️ El predio ya tiene el trámite ABIERTO ${json.tramite_existente?.codigo_tramite}. Te hemos llevado a ese expediente.`);
+          } else if (json.nuevo_caso) {
+            mostrarAviso(`✓ Trámite ${json.nuevo_caso.codigo_tramite} creado y abierto con tu archivo "${archivoSeleccionadoNombre}".`);
+          } else {
+            if ( json.documento_subido ) {
+              setDocSeleccionadoId(json.documento_subido.id);
+              setCamposEditablesDoc(json.documento_subido.campos_leidos_agente || []);
+            }
+            mostrarAviso(`✓ Archivo "${archivoSeleccionadoNombre}" adjuntado al trámite.`);
+          }
+        };
 
         const cambiarUsuario = async (usuario_id, puede_acceder_agente) => {
           const payload = { usuario_id };
@@ -191,7 +395,7 @@
         };
 
         const guardarYAprobarDocumento = async (documento_id, aprobar = true) => {
-          await fetch('/api/documento/aprobar-o-corregir', {
+          const res = await fetch('/api/documento/aprobar-o-corregir', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -200,8 +404,60 @@
               aprobar
             })
           });
+          const json = await res.json();
+          if (!res.ok || json.ok === false) {
+            mostrarError(json.error || 'No se pudo actualizar el documento.');
+            return;
+          }
           await cargarEstado();
           mostrarAviso(aprobar ? 'Documento verificado y aprobado por el abogado.' : 'Corrección guardada en el documento.');
+        };
+
+        const actualizarParteEnFicha = async (parte_id, cambios = {}) => {
+          const res = await fetch('/api/parte/aprobar-o-corregir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parte_id, ...cambios })
+          });
+          const json = await res.json();
+          if (!res.ok || json.ok === false) {
+            mostrarError(json.error || 'No se pudo actualizar el otorgante.');
+            return;
+          }
+          await cargarEstado();
+          mostrarAviso('Datos del otorgante actualizados.');
+        };
+
+        const agregarNuevaParteEnFicha = async (e) => {
+          e.preventDefault();
+          if (!nuevaParteNombre.trim() || !nuevaParteCedula.trim()) {
+            mostrarError('Ingresa el nombre completo y el número de cédula del otorgante.');
+            return;
+          }
+          const res = await fetch('/api/parte/agregar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agregar_nueva: true,
+              rol: nuevaParteRol,
+              nombres_completos: nuevaParteNombre,
+              numero_documento: nuevaParteCedula,
+              correo_electronico: nuevaParteCorreo,
+              estado_civil: nuevaParteEstadoCivil,
+              porcentaje: Number(nuevaPartePorcentaje || 100)
+            })
+          });
+          const json = await res.json();
+          if (!res.ok || json.ok === false) {
+            mostrarError(json.error || 'No se pudo agregar el otorgante.');
+            return;
+          }
+          setNuevaParteNombre('');
+          setNuevaParteCedula('');
+          setNuevaParteCorreo('');
+          setMostrarFormNuevaParte(false);
+          await cargarEstado();
+          mostrarAviso('Nuevo otorgante agregado al trámite.');
         };
 
         const aprobarLindero = async (lindero_id, valor_aprobado, aprobar_todos = false) => {
@@ -215,7 +471,7 @@
         };
 
         const avanzarFlujo = async (paso) => {
-          await fetch('/api/flujo/avanzar', {
+          const res = await fetch('/api/flujo/avanzar', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -224,8 +480,23 @@
               numero_escritura: numEscritura
             })
           });
+          const json = await res.json();
+          if (!res.ok || json.ok === false) {
+            mostrarError(json.error || 'No se cumplen las condiciones BPMN para avanzar a este paso.');
+            return;
+          }
           await cargarEstado();
-          mostrarAviso('Estado de aprobación del trámite actualizado.');
+          if (paso === 'VISTO_BUENO_ABOGADO') {
+            mostrarAviso('✓ 1. Visto Bueno Jurídico registrado. Ahora confirma los correos y envía el borrador a los clientes.');
+          } else if (paso === 'ENVIAR_BORRADOR_CLIENTES') {
+            mostrarAviso('✉️ 2. Borrador enviado por correo a todos los otorgantes. Ahora puedes registrar el Visto Bueno de Clientes.');
+          } else if (paso === 'VISTO_BUENO_CLIENTES') {
+            mostrarAviso('✓ 3. Visto Bueno de Clientes registrado. Ya puedes imprimir y cerrar la escritura.');
+          } else if (paso === 'ENVIAR_A_IMPRESION') {
+            mostrarAviso('✓ 4. Escritura impresa en papel notarial y trámite CERRADO.');
+          } else {
+            mostrarAviso('Estado del trámite actualizado.');
+          }
         };
 
         const reiniciarTodo = async () => {
@@ -238,34 +509,34 @@
         const ejecutarAccionBotonChat = async (tipo) => {
           if (tipo === 'VER_FICHA_TRAMITE') {
             setVistaActiva('FICHA_TRAMITE');
-          } else if (tipo === 'SUBIR_CEDULA_MONICA') {
-            await enviarInteraccionAgente({
-              subir_cedula_monica: true,
-              mensaje: 'Adjunto en el chat la Cédula de Ciudadanía de Mónica Patricia Pérez Gómez (C.C. 52.110.900).'
+          } else if (tipo === 'ABRIR_MODAL_NUEVO_TRAMITE_ARCHIVO' || tipo === 'CREAR_TRAMITE_NUEVO_CHIP') {
+            abrirSelectorArchivoReal({ abrirTramiteNuevo: true, tipoDoc: 'CERTIFICADO_TRADICION' });
+          } else if (tipo === 'ABRIR_MODAL_SUBIR_ARCHIVO' || tipo === 'SUBIR_CEDULA_MONICA') {
+            const parteFaltante = (data?.caso_activo?.partes || []).find((p) => !p.cedula_cargada);
+            abrirSelectorArchivoReal({
+              abrirTramiteNuevo: false,
+              tipoDoc: parteFaltante ? 'CEDULA_CIUDADANIA' : 'CERTIFICADO_TRADICION',
+              parteId: parteFaltante?.id || '',
+              nombreSugerido: parteFaltante?.nombres_completos || '',
+              cedulaSugerida: parteFaltante?.numero_documento || '',
+              correoSugerido: parteFaltante?.correo_electronico || ''
             });
-            mostrarAviso('Cédula de Mónica Pérez adjuntada en el chat.');
           } else if (tipo === 'VINCULAR_CONSTRUCTORA_CHAT') {
+            const proyElegido =
+              (data?.proyectos_constructoras || []).find((p) => p.proyecto_id === proyectoConstructoraIdInput) ||
+              data?.proyectos_constructoras?.[0];
             await enviarInteraccionAgente({
               vincular_constructora: true,
+              proyecto_id: proyElegido?.proyecto_id,
               torre_bloque: torreConstructoraInput,
               apartamento: aptoConstructoraInput,
-              mensaje: `Sí, este trámite pertenece al proyecto Torres del Parque Reservado P.H., ${torreConstructoraInput}, Apartamento ${aptoConstructoraInput}.`
+              mensaje: `Vinculo este trámite al proyecto ${proyElegido?.nombre_proyecto || 'Constructora'}, ${torreConstructoraInput}, Apartamento ${aptoConstructoraInput}.`
             });
-            mostrarAviso(`Vinculado a Constructora: ${torreConstructoraInput} · Apto ${aptoConstructoraInput}.`);
-          } else if (tipo === 'CREAR_TRAMITE_NUEVO_CHIP') {
-            await enviarInteraccionAgente({
-              crear_tramite_desde_chat: true,
-              forzar_nuevo_distinto: true,
-              chip: 'AAA0299BCDE',
-              apellido: 'RAMIREZ',
-              nombre_propietario: 'CAMILO ANDRÉS RAMÍREZ SOTO',
-              cedula: '80.554.321',
-              matricula: '50N-9944112',
-              mensaje: 'Adjunto Certificado de Libertad y Tradición matrícula 50N-9944112 (CHIP AAA0299BCDE) de Camilo Andrés Ramírez Soto (C.C. 80.554.321) para abrir nuevo trámite de Compraventa.'
-            });
-            mostrarAviso('Nuevo trámite COMPRAVENTA-AAA0299BCDE-RAMIREZ creado y abierto.');
+            mostrarAviso(`Vinculado a ${proyElegido?.nombre_proyecto || 'Constructora'}: ${torreConstructoraInput} · Apto ${aptoConstructoraInput}.`);
           } else if (tipo === 'APROBAR_ABOGADO') {
             await avanzarFlujo('VISTO_BUENO_ABOGADO');
+          } else if (tipo === 'ENVIAR_BORRADOR_CLIENTES') {
+            await avanzarFlujo('ENVIAR_BORRADOR_CLIENTES');
           } else if (tipo === 'APROBAR_CLIENTES') {
             await avanzarFlujo('VISTO_BUENO_CLIENTES');
           } else if (tipo === 'IMPRIMIR_ESCRITURA') {
@@ -512,9 +783,291 @@
               </div>
             </header>
 
+            {/* BANNER DE ALERTA / BLOQUEO DE COMPUERTA BPMN */}
+            {errorAlerta && (
+              <div className="bg-[#FEF3C7] border-b border-[#B45309]/40 px-6 py-2.5 flex items-center justify-between text-xs text-[#B45309]">
+                <div className="font-medium">⚠️ Control de Reglas BPMN Notariales: {errorAlerta}</div>
+                <button
+                  onClick={() => setErrorAlerta('')}
+                  className="px-2.5 py-0.5 rounded bg-white border border-[#B45309]/30 text-[11px] font-semibold text-[#1C1917]"
+                >
+                  Cerrar aviso
+                </button>
+              </div>
+            )}
+
+            {/* INPUT OCULTO DE CARGA REAL DE ARCHIVOS (PDF / IMÁGENES / TEXTO) */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={manejarSeleccionArchivoInput}
+              accept=".pdf,image/*,.txt,.doc,.docx"
+              className="hidden"
+            />
+
+            {/* MODAL DE CARGA Y EXTRACCIÓN REAL DE DOCUMENTO (CERTIFICADO DE TRADICIÓN, CÉDULA, PAZ Y SALVO, ESCRITURA) */}
+            {modalSubidaAbierto && (
+              <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-xl border border-[#E6E4DD] max-w-2xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto shadow-xl">
+                  <div className="flex items-center justify-between border-b border-[#E6E4DD] pb-3">
+                    <div>
+                      <h3 className="serif-editorial text-lg font-semibold text-[#1C1917]">
+                        {modoSubida === 'ABRIR_TRAMITE'
+                          ? 'Subir Certificado de Libertad y Tradición (Abrir Trámite Nuevo)'
+                          : 'Adjuntar Documento Real al Trámite Activo'}
+                      </h3>
+                      <p className="text-xs text-[#78716C]">
+                        Selecciona el archivo PDF o imagen de tu equipo. El sistema leerá el contenido real del documento para extraer sus datos registrales.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setModalSubidaAbierto(false)}
+                      className="px-2.5 py-1 rounded border border-[#E6E4DD] text-xs text-[#78716C] hover:text-[#1C1917]"
+                    >
+                      ✕ Cerrar
+                    </button>
+                  </div>
+
+                  {/* Selector de Archivo desde el computador */}
+                  <div className="p-4 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-xs">
+                      <div className="font-semibold text-[#1C1917]">
+                        {archivoSeleccionadoNombre
+                          ? `Archivo cargado: ${archivoSeleccionadoNombre} (${Math.round(Number(archivoSeleccionadoTamano || 0) / 1024)} KB)`
+                          : 'Ningún archivo seleccionado aún'}
+                      </div>
+                      <div className="text-[11px] text-[#78716C]">
+                        {extrayendoArchivo
+                          ? 'Leyendo páginas del PDF y extrayendo texto registral...'
+                          : 'Formatos soportados: PDF (.pdf), Imágenes (.jpg, .png) o Texto (.txt)'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                      className="px-4 py-2 rounded-lg bg-[#1C1917] text-white text-xs font-medium"
+                    >
+                      Seleccionar otro archivo de mi PC...
+                    </button>
+                  </div>
+
+                  {/* Vista previa instantánea del archivo subido */}
+                  {archivoDataUrl && (
+                    <div className="p-3 rounded-xl bg-[#F7F6F2] border border-[#E6E4DD] space-y-2">
+                      <div className="text-[11px] font-semibold text-[#78716C]">
+                        Vista Previa del Documento Original Seleccionado:
+                      </div>
+                      {archivoMime.includes('pdf') || archivoSeleccionadoNombre.toLowerCase().endsWith('.pdf') ? (
+                        <iframe
+                          src={archivoDataUrl}
+                          title="Vista previa PDF"
+                          className="w-full h-44 rounded-lg border border-[#E6E4DD] bg-white"
+                        />
+                      ) : archivoMime.startsWith('image/') ? (
+                        <img
+                          src={archivoDataUrl}
+                          alt="Documento subido"
+                          className="max-h-44 mx-auto rounded-lg border border-[#E6E4DD] object-contain"
+                        />
+                      ) : (
+                        <div className="text-xs mono-data p-2 bg-white rounded border border-[#E6E4DD] max-h-28 overflow-y-auto">
+                          {textoExtraidoArchivo || 'Archivo listo para procesar.'}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Configuración según modo: ABRIR_TRAMITE vs ADJUNTAR_DOC */}
+                  {modoSubida === 'ABRIR_TRAMITE' ? (
+                    <div className="space-y-3 text-xs">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[#78716C] font-medium">Tipo de Trámite a Abrir</label>
+                          <select
+                            value={subidaTramiteId}
+                            onChange={(e) => setSubidaTramiteId(e.target.value)}
+                            className="w-full border border-[#E6E4DD] rounded-lg px-3 py-2 bg-white text-xs"
+                          >
+                            {data.catalogo_tramites.map((t) => (
+                              <option key={t.tramite_id} value={t.tramite_id}>
+                                {t.nombre} ({t.tramite_id})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[#78716C] font-medium">Matrícula Inmobiliaria (Detectada o confirmar)</label>
+                          <input
+                            type="text"
+                            value={subidaMatricula}
+                            onChange={(e) => setSubidaMatricula(e.target.value)}
+                            placeholder="Ej: 50N-20458912"
+                            className="w-full border border-[#E6E4DD] rounded-lg px-3 py-2 mono-data"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[#78716C] font-medium">Código CHIP Catastral (Para codificación única)</label>
+                          <input
+                            type="text"
+                            value={subidaChip}
+                            onChange={(e) => setSubidaChip(e.target.value)}
+                            placeholder="Ej: AAA0254KLMN"
+                            className="w-full border border-[#E6E4DD] rounded-lg px-3 py-2 mono-data"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[#78716C] font-medium">Cédula Catastral</label>
+                          <input
+                            type="text"
+                            value={subidaCedulaCatastral}
+                            onChange={(e) => setSubidaCedulaCatastral(e.target.value)}
+                            placeholder="Ej: 00841201400601"
+                            className="w-full border border-[#E6E4DD] rounded-lg px-3 py-2 mono-data"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[#78716C] font-medium">Dirección del Inmueble (Extraída del Certificado)</label>
+                        <input
+                          type="text"
+                          value={subidaDireccion}
+                          onChange={(e) => setSubidaDireccion(e.target.value)}
+                          placeholder="Ej: Calle 94 No. 11-30 Apto 502, Bogotá D.C."
+                          className="w-full border border-[#E6E4DD] rounded-lg px-3 py-2"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[#78716C] font-medium">Propietario / Vendedor Principal</label>
+                          <input
+                            type="text"
+                            value={subidaPropietarioNombre}
+                            onChange={(e) => setSubidaPropietarioNombre(e.target.value)}
+                            placeholder="Nombre completo del titular"
+                            className="w-full border border-[#E6E4DD] rounded-lg px-3 py-2"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[#78716C] font-medium">Cédula / NIT del Titular</label>
+                          <input
+                            type="text"
+                            value={subidaPropietarioCedula}
+                            onChange={(e) => setSubidaPropietarioCedula(e.target.value)}
+                            placeholder="Ej: 79.888.111"
+                            className="w-full border border-[#E6E4DD] rounded-lg px-3 py-2 mono-data"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[#78716C] font-medium">Correo Electrónico Titular</label>
+                          <input
+                            type="email"
+                            value={subidaPropietarioCorreo}
+                            onChange={(e) => setSubidaPropietarioCorreo(e.target.value)}
+                            placeholder="titular@correo.com"
+                            className="w-full border border-[#E6E4DD] rounded-lg px-3 py-2 mono-data"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 text-xs">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[#78716C] font-medium">Tipo de Documento a Adjuntar en {caso.codigo_tramite}</label>
+                          <select
+                            value={tipoDocSubida}
+                            onChange={(e) => setTipoDocSubida(e.target.value)}
+                            className="w-full border border-[#E6E4DD] rounded-lg px-3 py-2 bg-white text-xs"
+                          >
+                            <option value="CEDULA">Cédula de Ciudadanía (Vendedor o Comprador)</option>
+                            <option value="CERTIFICADO_TRADICION">Certificado de Libertad y Tradición Actualizado</option>
+                            <option value="PAZ_Y_SALVO_ADMIN">Paz y Salvo de Administración P.H.</option>
+                            <option value="PAZ_Y_SALVO_PREDIAL">Paz y Salvo de Impuesto Predial / Valorización</option>
+                            <option value="ESCRITURA_ANTECEDENTE">Escritura Pública Antecedente (Linderos)</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[#78716C] font-medium">Reemplazar documento existente (Opcional)</label>
+                          <select
+                            value={docIdReemplazar}
+                            onChange={(e) => setDocIdReemplazar(e.target.value)}
+                            className="w-full border border-[#E6E4DD] rounded-lg px-3 py-2 bg-white text-xs"
+                          >
+                            <option value="">-- Detectar automáticamente o agregar como nuevo --</option>
+                            {caso.documentos.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.nombre} ({d.estado})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {tipoDocSubida === 'CEDULA' && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD]">
+                          <div className="space-y-1">
+                            <label className="text-[#78716C] font-medium">Rol del Interviniente</label>
+                            <select
+                              value={subidaRolParte}
+                              onChange={(e) => setSubidaRolParte(e.target.value)}
+                              className="w-full border border-[#E6E4DD] rounded-lg px-2.5 py-1.5 bg-white"
+                            >
+                              <option value="VENDEDOR">VENDEDOR (Propietario)</option>
+                              <option value="COMPRADOR">COMPRADOR</option>
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[#78716C] font-medium">Nombres y Apellidos</label>
+                            <input
+                              type="text"
+                              value={subidaPropietarioNombre}
+                              onChange={(e) => setSubidaPropietarioNombre(e.target.value)}
+                              placeholder="Ej: Mónica Patricia Pérez Gómez"
+                              className="w-full border border-[#E6E4DD] rounded-lg px-2.5 py-1.5 bg-white"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[#78716C] font-medium">Número de Cédula</label>
+                            <input
+                              type="text"
+                              value={subidaPropietarioCedula}
+                              onChange={(e) => setSubidaPropietarioCedula(e.target.value)}
+                              placeholder="Ej: 52.110.900"
+                              className="w-full border border-[#E6E4DD] rounded-lg px-2.5 py-1.5 bg-white mono-data"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#E6E4DD]">
+                    <button
+                      type="button"
+                      onClick={() => setModalSubidaAbierto(false)}
+                      className="px-4 py-2 rounded-lg border border-[#E6E4DD] text-xs text-[#78716C]"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmarSubidaArchivoReal}
+                      className="px-5 py-2 rounded-lg bg-[#1C1917] text-white text-xs font-medium hover:bg-black/85"
+                    >
+                      {modoSubida === 'ABRIR_TRAMITE'
+                        ? 'Procesar Certificado y Abrir Trámite →'
+                        : 'Subir Archivo y Procesar con el Agente →'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* =====================================================================
                 VISTA 1: PANTALLA 100% SOLO EL CHAT (CERO PANELES LATERALES)
-                Desde aquí se busca por cédula/CHIP/nombre, se adjuntan documentos,
+                Desde aquí se busca por cédula/CHIP/nombre, se adjuntan documentos reales,
                 se abre un trámite con el Certificado de Tradición (validando duplicados)
                 y al decir "Ver Trámite" se oculta el chat.
                ===================================================================== */}
@@ -564,9 +1117,12 @@
                           >
                             {caso.estado_apertura}
                           </span>
+                          <span className="text-[11px] text-[#78716C] mono-data">
+                            · Paso BPMN {estadoBpmn.paso_actual_numero}/6
+                          </span>
                         </div>
                         <p className="text-[11px] text-[#78716C] mt-0.5">
-                          Todo lo que escribas o adjuntes aquí queda guardado en este trámite. Puedes pedir buscar cualquier trámite por Cédula, CHIP o Nombre.
+                          Todo lo que escribas o adjuntes aquí queda guardado en este trámite. Puedes subir un Certificado de Libertad real para abrir un trámite nuevo o adjuntar cédulas/documentos.
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -580,7 +1136,7 @@
                           onClick={reiniciarTodo}
                           className="px-2.5 py-2 rounded-lg border border-[#E6E4DD] text-[11px] text-[#78716C] hover:text-[#1C1917]"
                         >
-                          Reiniciar demo
+                          Reiniciar base
                         </button>
                       </div>
                     </div>
@@ -715,54 +1271,41 @@
                       <div ref={chatEndRef} />
                     </div>
 
-                    {/* Barra de entrada del Chat + Sugerencias de lenguaje natural (Búsqueda por Cédula/CHIP, Apertura con Tradición y Constructora) */}
+                    {/* Barra de entrada del Chat + Botones de Carga Real de Archivos desde el PC */}
                     <div className="p-4 border-t border-[#E6E4DD] bg-[#FAF9F6] space-y-2.5">
-                      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                        <span className="text-[#78716C] mr-1">Prueba escribir o tocar:</span>
-                        <button
-                          onClick={() =>
-                            enviarInteraccionAgente({
-                              buscar_tramites: true,
-                              filtro_busqueda: 'mauricio tellez 79.451.200',
-                              mensaje: 'Oye dime el trámite de Mauricio Téllez cédula 79.451.200'
-                            })
-                          }
-                          className="px-2.5 py-1 rounded-md bg-white border border-[#E6E4DD] text-[#1C1917] hover:bg-[#F0EFEA]"
-                        >
-                          "Dime el trámite de Mauricio Téllez (C.C. 79.451.200)"
-                        </button>
-                        <button
-                          onClick={() =>
-                            enviarInteraccionAgente({
-                              buscar_tramites: true,
-                              filtro_busqueda: 'todos',
-                              mensaje: 'Muéstrame todos los trámites abiertos y cerrados'
-                            })
-                          }
-                          className="px-2.5 py-1 rounded-md bg-white border border-[#E6E4DD] text-[#1C1917] hover:bg-[#F0EFEA]"
-                        >
-                          "Ver trámites abiertos y cerrados"
-                        </button>
-                        <button
-                          onClick={() =>
-                            enviarInteraccionAgente({
-                              crear_tramite_desde_chat: true,
-                              forzar_duplicado_check: true,
-                              chip: 'AAA0142BCDE',
-                              cedula: '79.451.200',
-                              mensaje: 'Quiero abrir trámite de compraventa con el Certificado de Tradición CHIP AAA0142BCDE de Mauricio Téllez'
-                            })
-                          }
-                          className="px-2.5 py-1 rounded-md bg-white border border-[#E6E4DD] text-[#B45309] hover:bg-[#FEF3C7]/40"
-                        >
-                          "Intentar abrir duplicado de CHIP AAA0142BCDE (Ver bloqueo)"
-                        </button>
-                        <button
-                          onClick={() => ejecutarAccionBotonChat('CREAR_TRAMITE_NUEVO_CHIP')}
-                          className="px-2.5 py-1 rounded-md bg-white border border-[#E6E4DD] text-[#15803D] hover:bg-[#F0FDF4]"
-                        >
-                          "+ Adjuntar Certificado de Tradición nuevo (Abrir Trámite)"
-                        </button>
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => abrirSelectorArchivoReal('ADJUNTAR_DOC', 'CEDULA', '')}
+                            className="px-3 py-1.5 rounded-lg bg-[#1C1917] text-white font-medium hover:bg-black/85 flex items-center gap-1.5"
+                          >
+                            <span>📎 Adjuntar Documento Real (PDF / Imagen)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => abrirSelectorArchivoReal('ABRIR_TRAMITE', 'CERTIFICADO_TRADICION', '')}
+                            className="px-3 py-1.5 rounded-lg bg-white border border-[#1C1917] text-[#1C1917] font-medium hover:bg-[#F0EFEA] flex items-center gap-1.5"
+                          >
+                            <span>📄 + Subir Certificado de Libertad (Abrir Trámite Nuevo)</span>
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              enviarInteraccionAgente({
+                                buscar_tramites: true,
+                                filtro_busqueda: 'todos',
+                                mensaje: 'Muéstrame todos los trámites abiertos y cerrados'
+                              })
+                            }
+                            className="px-2.5 py-1 rounded-md bg-white border border-[#E6E4DD] text-[#78716C] hover:text-[#1C1917]"
+                          >
+                            Ver trámites abiertos y cerrados
+                          </button>
+                        </div>
                       </div>
 
                       <form
@@ -777,7 +1320,7 @@
                           type="text"
                           value={mensajeInput}
                           onChange={(e) => setMensajeInput(e.target.value)}
-                          placeholder="Pregunta por una cédula, CHIP o apellido, adjunta documentos o responde al Agente..."
+                          placeholder="Busca por cédula, CHIP o apellido, indica correos de los clientes o escribe al Agente..."
                           className="flex-1 bg-white border border-[#E6E4DD] rounded-lg px-4 py-2.5 text-xs text-[#1C1917] placeholder-[#78716C] focus:outline-none focus:border-[#1C1917]"
                         />
                         <button
@@ -796,87 +1339,183 @@
             {/* =====================================================================
                 VISTA 2: FICHA COMPLETA DEL TRÁMITE (SE OCULTA EL CHAT)
                 Muestra:
-                1. Alarmas (Documentos faltantes, vencimiento fin de mes, linderos con sello) y Proyecto Constructora
-                2. Información completa del Predio (Certificado de Libertad y Tradición) + Vendedores y Compradores
-                3. Visor Escaneado Documento por Documento (Cédulas, Tradición, Minuta mal escaneada con sellos) + Lo que leyó el Agente para Corregir o Aprobar
-                4. Estados de Aprobación del Abogado / Cliente y Minuta Final
+                1. Cadena BPMN de 6 Compuertas Estrictas (Con Envío por Correo a Clientes antes de Visto Bueno Clientes)
+                2. Alarmas y Proyecto Constructora dinámico
+                3. Información del Predio (Certificado de Libertad) + Vendedores y Compradores con Correos editables
+                4. Visor Escaneado Real (PDF / Imagen subida por el usuario o documento escaneado) + Lectura del Agente
                ===================================================================== */}
             {vistaActiva === 'FICHA_TRAMITE' && (
               <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-6 space-y-6">
-                {/* Encabezado de la Ficha con botón para volver al Chat */}
-                <div className="bg-white p-6 rounded-xl border border-[#E6E4DD] flex flex-wrap items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2.5">
-                      <button
-                        onClick={() => setVistaActiva('CHAT_PURO')}
-                        className="px-3 py-1 rounded-lg bg-[#F7F6F2] border border-[#E6E4DD] text-xs font-medium text-[#1C1917] hover:bg-[#F0EFEA]"
-                      >
-                        ← Volver al Chat del Trámite
-                      </button>
-                      <span className="mono-data text-xs font-semibold px-2.5 py-1 rounded bg-[#F7F6F2] border border-[#E6E4DD]">
-                        {caso.codigo_tramite}
-                      </span>
-                      <span
-                        className={`px-2.5 py-1 rounded text-xs font-semibold ${
-                          caso.estado_apertura === 'ABIERTO'
-                            ? 'bg-[#F0FDF4] text-[#15803D] border border-[#BBF7D0]'
-                            : 'bg-[#F0EFEA] text-[#78716C] border border-[#E6E4DD]'
-                        }`}
-                      >
-                        ESTADO: {caso.estado_apertura}
-                      </span>
+                {/* Encabezado de la Ficha con Cadena BPMN Estricta de 4 Botones de Cierre */}
+                <div className="bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2.5">
+                        <button
+                          onClick={() => setVistaActiva('CHAT_PURO')}
+                          className="px-3 py-1 rounded-lg bg-[#F7F6F2] border border-[#E6E4DD] text-xs font-medium text-[#1C1917] hover:bg-[#F0EFEA]"
+                        >
+                          ← Volver al Chat del Trámite
+                        </button>
+                        <span className="mono-data text-xs font-semibold px-2.5 py-1 rounded bg-[#F7F6F2] border border-[#E6E4DD]">
+                          {caso.codigo_tramite}
+                        </span>
+                        <span
+                          className={`px-2.5 py-1 rounded text-xs font-semibold ${
+                            caso.estado_apertura === 'ABIERTO'
+                              ? 'bg-[#F0FDF4] text-[#15803D] border border-[#BBF7D0]'
+                              : 'bg-[#F0EFEA] text-[#78716C] border border-[#E6E4DD]'
+                          }`}
+                        >
+                          ESTADO: {caso.estado_apertura}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => abrirSelectorArchivoReal('ADJUNTAR_DOC', 'CEDULA', '')}
+                          className="px-3 py-1 rounded-lg bg-[#1C1917] text-white text-xs font-medium hover:bg-black/85"
+                        >
+                          📎 + Subir Documento Real al Expediente
+                        </button>
+                      </div>
+                      <h2 className="serif-editorial text-xl font-semibold text-[#1C1917] pt-1">
+                        {caso.titulo_tramite}
+                      </h2>
+                      <p className="text-xs text-[#78716C]">
+                        Tipo de Trámite: <span className="font-medium text-[#1C1917]">{caso.tramite_nombre}</span> ({caso.tramite_id}) · Subcategorías:{' '}
+                        <span className="mono-data">{(caso.subcategorias_activas || []).join(', ')}</span>
+                      </p>
                     </div>
-                    <h2 className="serif-editorial text-xl font-semibold text-[#1C1917] pt-1">
-                      {caso.titulo_tramite}
-                    </h2>
-                    <p className="text-xs text-[#78716C]">
-                      Tipo de Trámite: <span className="font-medium text-[#1C1917]">{caso.tramite_nombre}</span> ({caso.tramite_id}) · Subcategorías:{' '}
-                      <span className="mono-data">{(caso.subcategorias_activas || []).join(', ')}</span>
-                    </p>
+
+                    {/* CADENA DE APROBACIÓN BPMN ESTRICTA (4 Compuertas Secuenciales con Bloqueo de Orden) */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {usuarioActivo.permisos.puede_verificar_aprobar ? (
+                        <>
+                          {/* Compuerta 3: Visto Bueno Jurídico del Abogado Verificador (Exige Docs + Linderos aprobados) */}
+                          <button
+                            onClick={() => avanzarFlujo('VISTO_BUENO_ABOGADO')}
+                            disabled={!estadoBpmn.docs_aprobados_individualmente || !estadoBpmn.linderos_listos}
+                            title={
+                              !estadoBpmn.docs_aprobados_individualmente || !estadoBpmn.linderos_listos
+                                ? 'Primero debes aprobar cada documento y resolver los linderos dudosos'
+                                : 'Dar Visto Bueno Jurídico del Abogado Verificador'
+                            }
+                            className={`px-3.5 py-2 rounded-lg text-xs font-medium border transition ${
+                              estadoBpmn.abogado_aprobo
+                                ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]'
+                                : !estadoBpmn.docs_aprobados_individualmente || !estadoBpmn.linderos_listos
+                                ? 'bg-[#F0EFEA] border-[#E6E4DD] text-[#78716C] opacity-60 cursor-not-allowed'
+                                : 'bg-[#1C1917] text-white border-[#1C1917]'
+                            }`}
+                          >
+                            {estadoBpmn.abogado_aprobo
+                              ? `✓ 1. Aprobado (${caso.aprobaciones.abogado_que_aprobo || usuarioActivo.nombre})`
+                              : '1. Dar Aprobación Jurídica (Abogado)'}
+                          </button>
+
+                          {/* Compuerta 4: Enviar Borrador por Correo a Clientes (Exige Visto Bueno Abogado + Correos de partes) */}
+                          <button
+                            onClick={() => avanzarFlujo('ENVIAR_BORRADOR_CLIENTES')}
+                            disabled={!estadoBpmn.abogado_aprobo}
+                            title={
+                              !estadoBpmn.abogado_aprobo
+                                ? 'Bloqueado: Primero se requiere el Visto Bueno Jurídico del Abogado Verificador'
+                                : 'Enviar borrador de escritura a los correos electrónicos de vendedores y compradores'
+                            }
+                            className={`px-3.5 py-2 rounded-lg text-xs font-medium border transition ${
+                              estadoBpmn.enviado_a_clientes
+                                ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]'
+                                : !estadoBpmn.abogado_aprobo
+                                ? 'bg-[#F0EFEA] border-[#E6E4DD] text-[#78716C] opacity-60 cursor-not-allowed'
+                                : 'bg-[#1C1917] text-white border-[#1C1917]'
+                            }`}
+                          >
+                            {estadoBpmn.enviado_a_clientes
+                              ? '✓ 2. Borrador Enviado por Correo'
+                              : '2. Enviar Borrador por Correo a Clientes'}
+                          </button>
+
+                          {/* Compuerta 5: Confirmar Visto Bueno Clientes (Exige Visto Bueno Abogado + Haber enviado el borrador por correo) */}
+                          <button
+                            onClick={() => avanzarFlujo('VISTO_BUENO_CLIENTES')}
+                            disabled={!estadoBpmn.abogado_aprobo || !estadoBpmn.enviado_a_clientes}
+                            title={
+                              !estadoBpmn.abogado_aprobo || !estadoBpmn.enviado_a_clientes
+                                ? 'Bloqueado: No se puede dar Visto Bueno de Clientes sin Aprobación del Abogado y sin haber enviado antes el borrador por correo'
+                                : 'Confirmar Visto Bueno de Vendedores y Compradores'
+                            }
+                            className={`px-3.5 py-2 rounded-lg text-xs font-medium border transition ${
+                              estadoBpmn.cliente_aprobo
+                                ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]'
+                                : !estadoBpmn.abogado_aprobo || !estadoBpmn.enviado_a_clientes
+                                ? 'bg-[#F0EFEA] border-[#E6E4DD] text-[#78716C] opacity-60 cursor-not-allowed'
+                                : 'bg-[#1C1917] text-white border-[#1C1917]'
+                            }`}
+                          >
+                            {estadoBpmn.cliente_aprobo
+                              ? '✓ 3. Visto Bueno Clientes OK'
+                              : '3. Confirmar Visto Bueno Clientes'}
+                          </button>
+
+                          {/* Compuerta 6: Imprimir y Cerrar Trámite (Exige Visto Bueno Clientes) */}
+                          <button
+                            onClick={() => avanzarFlujo('ENVIAR_A_IMPRESION')}
+                            disabled={!estadoBpmn.cliente_aprobo}
+                            title={
+                              !estadoBpmn.cliente_aprobo
+                                ? 'Bloqueado: Primero deben estar completados el Visto Bueno del Abogado, el Envío por Correo y el Visto Bueno de los Clientes'
+                                : 'Asignar folios notariales, imprimir y cerrar trámite'
+                            }
+                            className={`px-3.5 py-2 rounded-lg text-xs font-medium border transition ${
+                              caso.estado_apertura === 'CERRADO'
+                                ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]'
+                                : !estadoBpmn.cliente_aprobo
+                                ? 'bg-[#F0EFEA] border-[#E6E4DD] text-[#78716C] opacity-60 cursor-not-allowed'
+                                : 'bg-[#1C1917] text-white border-[#1C1917]'
+                            }`}
+                          >
+                            {caso.estado_apertura === 'CERRADO'
+                              ? '✓ 4. Trámite Impreso y Cerrado'
+                              : '4. Imprimir y Cerrar Trámite'}
+                          </button>
+                        </>
+                      ) : (
+                        <div className="px-3.5 py-2 rounded-lg bg-[#FAF9F6] border border-[#E6E4DD] text-xs text-[#78716C]">
+                          Perfil actual: <strong className="text-[#1C1917]">{usuarioActivo.cargo}</strong> (Cambia a Abogado Verificador arriba para aprobar documentos)
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Acciones de Aprobación del Trámite según el Perfil */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    {usuarioActivo.permisos.puede_verificar_aprobar ? (
-                      <>
-                        <button
-                          onClick={() => avanzarFlujo('VISTO_BUENO_ABOGADO')}
-                          className={`px-4 py-2 rounded-lg text-xs font-medium border ${
-                            estadoBpmn.abogado_aprobo
-                              ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]'
-                              : 'bg-[#1C1917] text-white border-[#1C1917]'
-                          }`}
-                        >
-                          {estadoBpmn.abogado_aprobo
-                            ? `✓ Aprobado por ${caso.aprobaciones.abogado_que_aprobo || usuarioActivo.nombre}`
-                            : '1. Dar Aprobación Jurídica (Abogado Verificador)'}
-                        </button>
-                        <button
-                          onClick={() => avanzarFlujo('VISTO_BUENO_CLIENTES')}
-                          className={`px-3.5 py-2 rounded-lg text-xs font-medium border ${
-                            estadoBpmn.cliente_aprobo
-                              ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]'
-                              : 'bg-white border-[#E6E4DD] text-[#1C1917]'
-                          }`}
-                        >
-                          {estadoBpmn.cliente_aprobo ? '✓ Visto Bueno Clientes OK' : '2. Confirmar Visto Bueno Clientes'}
-                        </button>
-                        <button
-                          onClick={() => avanzarFlujo('ENVIAR_A_IMPRESION')}
-                          className="px-4 py-2 rounded-lg bg-[#1C1917] text-white text-xs font-medium"
-                        >
-                          {caso.estado_apertura === 'CERRADO' ? '✓ Trámite Impreso y Cerrado' : '3. Imprimir y Cerrar Trámite'}
-                        </button>
-                      </>
-                    ) : (
-                      <div className="px-3.5 py-2 rounded-lg bg-[#FAF9F6] border border-[#E6E4DD] text-xs text-[#78716C]">
-                        Perfil actual: <strong className="text-[#1C1917]">{usuarioActivo.cargo}</strong> (Cambia a Abogado Verificador arriba para aprobar documentos)
-                      </div>
-                    )}
+                  {/* Barra de Progreso BPMN de las 6 Compuertas */}
+                  <div className="pt-3 border-t border-[#E6E4DD] grid grid-cols-2 md:grid-cols-6 gap-2 text-[11px]">
+                    <div className={`p-2 rounded-lg border ${estadoBpmn.docs_completos ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]' : 'bg-[#FEF3C7]/40 border-[#FDE68A] text-[#B45309]'}`}>
+                      <div className="font-semibold">1. Documentos y Vigencia</div>
+                      <div>{estadoBpmn.docs_completos ? '✓ Completos' : 'Faltan soportes'}</div>
+                    </div>
+                    <div className={`p-2 rounded-lg border ${estadoBpmn.docs_aprobados_individualmente && estadoBpmn.linderos_listos ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]' : 'bg-[#FEF3C7]/40 border-[#FDE68A] text-[#B45309]'}`}>
+                      <div className="font-semibold">2. Revisión Doc x Doc</div>
+                      <div>{estadoBpmn.docs_aprobados_individualmente && estadoBpmn.linderos_listos ? '✓ Todos aprobados' : 'Por aprobar abajo'}</div>
+                    </div>
+                    <div className={`p-2 rounded-lg border ${estadoBpmn.abogado_aprobo ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]' : 'bg-[#FAF9F6] border-[#E6E4DD] text-[#78716C]'}`}>
+                      <div className="font-semibold">3. Visto Bueno Abogado</div>
+                      <div>{estadoBpmn.abogado_aprobo ? '✓ Aprobado' : 'Requiere paso 2'}</div>
+                    </div>
+                    <div className={`p-2 rounded-lg border ${estadoBpmn.enviado_a_clientes ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]' : 'bg-[#FAF9F6] border-[#E6E4DD] text-[#78716C]'}`}>
+                      <div className="font-semibold">4. Envío por Correo</div>
+                      <div>{estadoBpmn.enviado_a_clientes ? `✓ Enviado (${caso.aprobaciones.fecha_envio_clientes || 'OK'})` : 'Requiere paso 3 + correos'}</div>
+                    </div>
+                    <div className={`p-2 rounded-lg border ${estadoBpmn.cliente_aprobo ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]' : 'bg-[#FAF9F6] border-[#E6E4DD] text-[#78716C]'}`}>
+                      <div className="font-semibold">5. Visto Bueno Clientes</div>
+                      <div>{estadoBpmn.cliente_aprobo ? '✓ Aceptado' : 'Requiere paso 4'}</div>
+                    </div>
+                    <div className={`p-2 rounded-lg border ${estadoBpmn.impreso ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]' : 'bg-[#FAF9F6] border-[#E6E4DD] text-[#78716C]'}`}>
+                      <div className="font-semibold">6. Impresión y Cierre</div>
+                      <div>{estadoBpmn.impreso ? '✓ Escritura cerrada' : 'Requiere paso 5'}</div>
+                    </div>
                   </div>
                 </div>
 
-                {/* BLOQUE 1: ALARMAS DEL TRÁMITE (Faltantes, Vencimiento Fin de Mes, Linderos) Y VINCULACIÓN CON CONSTRUCTORA */}
+                {/* BLOQUE 1: ALARMAS DEL TRÁMITE Y VINCULACIÓN CON CONSTRUCTORA DINÁMICA */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                   <div className="lg:col-span-7 bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-3">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-[#78716C]">
@@ -900,7 +1539,7 @@
                             </span>
                           </div>
                         ))}
-                      {caso.documentos.every((d) => d.aprobado_abogado) && (
+                      {caso.documentos.every((d) => d.aprobado_abogado && d.estado === 'CARGADO') && (
                         <div className="p-4 rounded-lg bg-[#F0FDF4] border border-[#BBF7D0] text-xs text-[#15803D] font-medium">
                           ✓ Todos los documentos adjuntos han sido verificados y aprobados sin alarmas pendientes.
                         </div>
@@ -908,13 +1547,13 @@
                     </div>
                   </div>
 
-                  {/* Vinculación con Proyecto de Constructora (Torre y Apartamento) */}
+                  {/* Vinculación con Proyecto de Constructora 100% Dinámica desde data.proyectos_constructoras */}
                   <div className="lg:col-span-5 bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-3">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-[#78716C]">
                       ¿Pertenece a un Proyecto de Constructora?
                     </h3>
                     {caso.pertenece_constructora ? (
-                      <div className="p-4 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] space-y-1 text-xs">
+                      <div className="p-4 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] space-y-1.5 text-xs">
                         <div className="font-semibold text-[#15803D]">
                           ✓ Vinculado a Proyecto de Constructora
                         </div>
@@ -922,48 +1561,88 @@
                           {caso.constructora_info.nombre_proyecto}
                         </div>
                         <div className="mono-data text-[#78716C]">
-                          Bloque/Torre: {caso.constructora_info.torre_bloque} · Apartamento: {caso.constructora_info.apartamento}
+                          Bloque/Torre: {caso.constructora_info.torre_bloque} · Apartamento: {caso.constructora_info.apartamento} · Estado: {caso.constructora_info.estado_unidad}
                         </div>
                       </div>
                     ) : (
-                      <div className="space-y-3 text-xs">
+                      <div className="space-y-2.5 text-xs">
                         <p className="text-[#78716C]">
-                          Si este trámite corresponde a una unidad de constructora, selecciona Torre y Apartamento para vincularlo y actualizar su estado:
+                          Selecciona el Proyecto, la Torre y el Apartamento configurados para vincular este trámite y sincronizar su estado:
                         </p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <select
-                            value={torreConstructoraInput}
-                            onChange={(e) => setTorreConstructoraInput(e.target.value)}
-                            className="border border-[#E6E4DD] rounded-lg px-3 py-2 text-xs bg-white"
-                          >
-                            <option value="Torre A">Torre A</option>
-                            <option value="Torre B">Torre B</option>
-                            <option value="Torre C">Torre C</option>
-                          </select>
-                          <select
-                            value={aptoConstructoraInput}
-                            onChange={(e) => setAptoConstructoraInput(e.target.value)}
-                            className="border border-[#E6E4DD] rounded-lg px-3 py-2 text-xs bg-white"
-                          >
-                            <option value="101">Apartamento 101</option>
-                            <option value="201">Apartamento 201</option>
-                            <option value="301">Apartamento 301</option>
-                            <option value="401">Apartamento 401</option>
-                            <option value="501">Apartamento 501</option>
-                          </select>
-                        </div>
+                        <select
+                          value={proyectoConstructoraIdInput}
+                          onChange={(e) => {
+                            const pid = e.target.value;
+                            setProyectoConstructoraIdInput(pid);
+                            const pObj = data.proyectos_constructoras.find((p) => p.proyecto_id === pid);
+                            if (pObj && pObj.bloques_configurados[0]) {
+                              setTorreConstructoraInput(pObj.bloques_configurados[0]);
+                            }
+                          }}
+                          className="w-full border border-[#E6E4DD] rounded-lg px-3 py-2 text-xs bg-white"
+                        >
+                          {data.proyectos_constructoras.map((pr) => (
+                            <option key={pr.proyecto_id} value={pr.proyecto_id}>
+                              {pr.nombre_proyecto} ({pr.constructora})
+                            </option>
+                          ))}
+                        </select>
+                        {(() => {
+                          const proySel =
+                            data.proyectos_constructoras.find((p) => p.proyecto_id === proyectoConstructoraIdInput) ||
+                            data.proyectos_constructoras[0];
+                          const bloquesDisp = proySel ? proySel.bloques_configurados : ['Torre A'];
+                          const unidadesDisp = proySel
+                            ? proySel.unidades.filter((u) => u.bloque === torreConstructoraInput)
+                            : [];
+                          return (
+                            <div className="grid grid-cols-2 gap-2">
+                              <select
+                                value={torreConstructoraInput}
+                                onChange={(e) => setTorreConstructoraInput(e.target.value)}
+                                className="border border-[#E6E4DD] rounded-lg px-3 py-2 text-xs bg-white"
+                              >
+                                {bloquesDisp.map((b) => (
+                                  <option key={b} value={b}>
+                                    {b}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
+                                value={aptoConstructoraInput}
+                                onChange={(e) => setAptoConstructoraInput(e.target.value)}
+                                className="border border-[#E6E4DD] rounded-lg px-3 py-2 text-xs bg-white"
+                              >
+                                {unidadesDisp.length > 0 ? (
+                                  unidadesDisp.map((u) => (
+                                    <option key={u.unidad_id} value={u.apartamento}>
+                                      Apto {u.apartamento} ({u.estado_dinamico})
+                                    </option>
+                                  ))
+                                ) : (
+                                  <>
+                                    <option value="101">Apto 101</option>
+                                    <option value="201">Apto 201</option>
+                                    <option value="301">Apto 301</option>
+                                    <option value="401">Apto 401</option>
+                                  </>
+                                )}
+                              </select>
+                            </div>
+                          );
+                        })()}
                         <button
                           onClick={() => ejecutarAccionBotonChat('VINCULAR_CONSTRUCTORA_CHAT')}
                           className="w-full py-2 rounded-lg bg-[#1C1917] text-white text-xs font-medium"
                         >
-                          Guardar Torre y Apartamento en el Trámite
+                          Guardar Proyecto, Torre y Apartamento en el Trámite
                         </button>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* BLOQUE 2: INFORMACIÓN COMPLETA DEL PREDIO (CERTIFICADO DE LIBERTAD Y TRADICIÓN) + VENDEDORES Y COMPRADORES */}
+                {/* BLOQUE 2: INFORMACIÓN COMPLETA DEL PREDIO (CERTIFICADO DE LIBERTAD Y TRADICIÓN) + VENDEDORES Y COMPRADORES CON CORREOS */}
                 <div className="bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-6">
                   <div className="border-b border-[#E6E4DD] pb-3 flex flex-wrap items-center justify-between gap-2">
                     <div>
@@ -971,7 +1650,7 @@
                         2. Información del Predio (Extraída del Certificado de Libertad y Tradición) e Intervinientes
                       </h3>
                       <p className="text-xs text-[#78716C]">
-                        Datos registrales completos que dieron apertura al trámite <span className="mono-data font-medium text-[#1C1917]">{caso.codigo_tramite}</span>
+                        Datos registrales que abrieron el trámite <span className="mono-data font-medium text-[#1C1917]">{caso.codigo_tramite}</span>
                       </p>
                     </div>
                     <span className="mono-data text-xs px-3 py-1 rounded bg-[#F7F6F2] border border-[#E6E4DD]">
@@ -1038,54 +1717,106 @@
                     </div>
                   </div>
 
-                  {/* Tabla de Vendedores y Compradores con Aprobación */}
-                  <div>
-                    <h4 className="text-xs font-semibold uppercase tracking-wider text-[#78716C] mb-2">
-                      Vendedores (Últimos Propietarios en Tradición) y Compradores (Otras Cédulas)
-                    </h4>
-                    <div className="border border-[#E6E4DD] rounded-xl overflow-hidden">
+                  {/* Tabla de Vendedores y Compradores con Correo Electrónico Obligatorio para Envío de Borrador */}
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wider text-[#78716C]">
+                        Vendedores y Compradores (Con Correo Electrónico para Envío del Borrador antes del Visto Bueno Clientes)
+                      </h4>
+                      {caso.aprobaciones.enviado_a_clientes && (
+                        <span className="px-2.5 py-1 rounded bg-[#F0FDF4] border border-[#BBF7D0] text-[11px] font-medium text-[#15803D]">
+                          ✓ Borrador enviado el {caso.aprobaciones.fecha_envio_clientes} a: {(caso.aprobaciones.correos_notificados || []).join(', ')}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="border border-[#E6E4DD] rounded-xl overflow-x-auto">
                       <table className="w-full text-left border-collapse text-xs">
                         <thead>
                           <tr className="bg-[#F7F6F2] border-b border-[#E6E4DD] text-[#78716C]">
-                            <th className="py-2.5 px-4 font-medium">Rol y %</th>
-                            <th className="py-2.5 px-4 font-medium">Nombres y Apellidos</th>
-                            <th className="py-2.5 px-4 font-medium">Cédula</th>
-                            <th className="py-2.5 px-4 font-medium">Estado Cédula</th>
-                            <th className="py-2.5 px-4 font-medium">Verificación Abogado</th>
+                            <th className="py-2.5 px-3 font-medium">Rol y %</th>
+                            <th className="py-2.5 px-3 font-medium">Nombres y Apellidos</th>
+                            <th className="py-2.5 px-3 font-medium">Cédula</th>
+                            <th className="py-2.5 px-3 font-medium">Correo Electrónico (Para Envío Borrador)</th>
+                            <th className="py-2.5 px-3 font-medium">Documento Cédula</th>
+                            <th className="py-2.5 px-3 font-medium">Verificación Abogado</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#E6E4DD]">
                           {caso.partes.map((p) => (
                             <tr key={p.id}>
-                              <td className="py-3 px-4 font-semibold text-[#1C1917]">
+                              <td className="py-3 px-3 font-semibold text-[#1C1917]">
                                 {p.rol} ({Number(p.porcentaje || 0)}%)
                               </td>
-                              <td className="py-3 px-4">
-                                <div className="font-medium text-[#1C1917]">{p.nombres_completos}</div>
-                                <div className="text-[11px] text-[#78716C]">{p.origen_inferencia}</div>
+                              <td className="py-3 px-3">
+                                <input
+                                  type="text"
+                                  defaultValue={p.nombres_completos}
+                                  onBlur={(e) => {
+                                    if (e.target.value !== p.nombres_completos) {
+                                      actualizarParteEnFicha(p.id, { nombres_completos: e.target.value });
+                                    }
+                                  }}
+                                  className="font-medium text-[#1C1917] bg-transparent border-b border-transparent focus:border-[#1C1917] focus:outline-none w-full"
+                                />
+                                <div className="text-[10px] text-[#78716C]">{p.origen_inferencia}</div>
                               </td>
-                              <td className="py-3 px-4 mono-data">{p.numero_documento}</td>
-                              <td className="py-3 px-4">
+                              <td className="py-3 px-3 mono-data">
+                                <input
+                                  type="text"
+                                  defaultValue={p.numero_documento}
+                                  onBlur={(e) => {
+                                    if (e.target.value !== p.numero_documento) {
+                                      actualizarParteEnFicha(p.id, { numero_documento: e.target.value });
+                                    }
+                                  }}
+                                  className="mono-data text-[#1C1917] bg-transparent border-b border-transparent focus:border-[#1C1917] focus:outline-none w-28"
+                                />
+                              </td>
+                              <td className="py-3 px-3">
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="email"
+                                    defaultValue={p.correo_electronico || ''}
+                                    placeholder="correo@cliente.com"
+                                    onBlur={(e) => {
+                                      if (e.target.value !== (p.correo_electronico || '')) {
+                                        actualizarParteEnFicha(p.id, { correo_electronico: e.target.value });
+                                      }
+                                    }}
+                                    className="border border-[#E6E4DD] rounded px-2 py-1 text-xs mono-data bg-[#FAF9F6] w-48"
+                                  />
+                                  {p.borrador_enviado && (
+                                    <span className="text-[10px] text-[#15803D] font-semibold" title="Borrador enviado">
+                                      ✓ Enviado
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-3">
                                 {p.cedula_cargada ? (
                                   <span className="text-[#15803D] font-medium">✓ Adjuntada</span>
                                 ) : (
                                   <button
-                                    onClick={() => ejecutarAccionBotonChat('SUBIR_CEDULA_MONICA')}
+                                    onClick={() => abrirSelectorArchivoReal('ADJUNTAR_DOC', 'CEDULA', 'DOC-CED-MONICA')}
                                     className="px-2.5 py-1 rounded bg-[#1C1917] text-white text-[11px]"
                                   >
-                                    + Adjuntar Cédula
+                                    📎 + Subir Cédula Real
                                   </button>
                                 )}
                               </td>
-                              <td className="py-3 px-4">
+                              <td className="py-3 px-3">
                                 {p.aprobado_verificador ? (
                                   <span className="px-2.5 py-1 rounded bg-[#F0FDF4] text-[#15803D] text-[11px] font-medium">
-                                    ✓ Aprobado por {p.aprobado_por}
+                                    ✓ Aprobado ({p.aprobado_por})
                                   </span>
                                 ) : (
-                                  <span className="px-2.5 py-1 rounded bg-[#FEF3C7] text-[#B45309] text-[11px]">
-                                    Pendiente aprobar documento abajo
-                                  </span>
+                                  <button
+                                    onClick={() => actualizarParteEnFicha(p.id, { accion: 'APROBAR' })}
+                                    className="px-2.5 py-1 rounded bg-[#FEF3C7] border border-[#FDE68A] text-[#B45309] text-[11px] font-medium hover:bg-[#FDE68A]"
+                                  >
+                                    Aprobar interviniente
+                                  </button>
                                 )}
                               </td>
                             </tr>
@@ -1093,12 +1824,66 @@
                         </tbody>
                       </table>
                     </div>
+
+                    {/* Formulario rápido para agregar otro Vendedor o Comprador al trámite */}
+                    <form
+                      onSubmit={agregarNuevaParteEnFicha}
+                      className="p-3.5 rounded-xl bg-[#FAF9F6] border border-[#E6E4DD] flex flex-wrap items-end gap-2.5 text-xs"
+                    >
+                      <div>
+                        <label className="block text-[10px] text-[#78716C] mb-1">Rol</label>
+                        <select
+                          value={nuevaParteRol}
+                          onChange={(e) => setNuevaParteRol(e.target.value)}
+                          className="border border-[#E6E4DD] rounded-lg px-2.5 py-1.5 bg-white text-xs"
+                        >
+                          <option value="COMPRADOR">COMPRADOR</option>
+                          <option value="VENDEDOR">VENDEDOR</option>
+                        </select>
+                      </div>
+                      <div className="flex-1 min-w-[180px]">
+                        <label className="block text-[10px] text-[#78716C] mb-1">Nombres y Apellidos del Otorgante</label>
+                        <input
+                          type="text"
+                          value={nuevaParteNombre}
+                          onChange={(e) => setNuevaParteNombre(e.target.value)}
+                          placeholder="Ej: Laura Sofía Restrepo"
+                          className="w-full border border-[#E6E4DD] rounded-lg px-2.5 py-1.5 bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#78716C] mb-1">Cédula / NIT</label>
+                        <input
+                          type="text"
+                          value={nuevaParteCedula}
+                          onChange={(e) => setNuevaParteCedula(e.target.value)}
+                          placeholder="Ej: 1.020.445.890"
+                          className="border border-[#E6E4DD] rounded-lg px-2.5 py-1.5 bg-white mono-data w-36"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#78716C] mb-1">Correo Electrónico</label>
+                        <input
+                          type="email"
+                          value={nuevaParteCorreo}
+                          onChange={(e) => setNuevaParteCorreo(e.target.value)}
+                          placeholder="cliente@correo.com"
+                          className="border border-[#E6E4DD] rounded-lg px-2.5 py-1.5 bg-white mono-data w-44"
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        className="px-3.5 py-1.5 rounded-lg bg-[#1C1917] text-white font-medium"
+                      >
+                        + Agregar Otorgante
+                      </button>
+                    </form>
                   </div>
                 </div>
 
                 {/* =====================================================================
                     BLOQUE 3: VERIFICACIÓN Y APROBACIÓN VISUAL DOCUMENTO POR DOCUMENTO
-                    (A la izquierda la Imagen Escaneada del Documento; a la derecha lo que leyó el Agente editable para Corregir o Aprobar)
+                    (A la izquierda el PDF / Imagen Real subida por el usuario o su escaneo; a la derecha lo que leyó el Agente editable para Corregir o Aprobar)
                    ===================================================================== */}
                 <div className="bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-5">
                   <div className="border-b border-[#E6E4DD] pb-4 flex flex-wrap items-center justify-between gap-4">
@@ -1107,9 +1892,16 @@
                         3. Verificación Visual de Documentos Escaneados vs. Lectura del Agente
                       </h3>
                       <p className="text-xs text-[#78716C]">
-                        Selecciona cada documento adjunto para ver a la izquierda la imagen escaneada original (Cédula, Tradición, Paz y Salvo o Minuta Anterior con sellos) y a la derecha corregir o aprobar lo que leyó el Agente.
+                        Selecciona cada soporte para ver a la izquierda el archivo PDF/imagen original y a la derecha corregir o aprobar lo que leyó el Agente.
                       </p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => abrirSelectorArchivoReal('ADJUNTAR_DOC', 'CERTIFICADO_TRADICION', docActual.id)}
+                      className="px-3.5 py-2 rounded-lg bg-[#F7F6F2] border border-[#E6E4DD] text-xs font-medium text-[#1C1917] hover:bg-[#F0EFEA]"
+                    >
+                      📎 Subir / Reemplazar Archivo de "{docActual.nombre}" desde mi PC
+                    </button>
                   </div>
 
                   {/* Selector de todos los documentos del trámite */}
@@ -1138,22 +1930,52 @@
                     ))}
                   </div>
 
-                  {/* Comparador Lado a Lado: IZQUIERDA (Imagen Escaneada del Documento) | DERECHA (Lo que leyó el Agente + Corregir o Aprobar) */}
+                  {/* Comparador Lado a Lado: IZQUIERDA (Visor Real del Archivo Subido o Escaneo) | DERECHA (Lo que leyó el Agente + Corregir o Aprobar) */}
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-2">
-                    {/* IZQUIERDA: IMAGEN ESCANEADA DEL DOCUMENTO */}
+                    {/* IZQUIERDA: VISOR DEL ARCHIVO REAL SUBIDO O ESCANEO ORIGINAL */}
                     <div className="lg:col-span-6 p-5 rounded-xl bg-[#FAF8F5] border border-[#E6E4DD] space-y-4">
                       <div className="flex items-center justify-between border-b border-[#E6E4DD] pb-2.5">
                         <div>
                           <span className="text-[10px] uppercase tracking-wider text-[#78716C] font-semibold">
-                            Imagen del Documento Escaneado Original
+                            Documento Escaneado / Archivo Original Subido
                           </span>
                           <h4 className="text-xs font-semibold text-[#1C1917] mono-data">{docActual.archivo}</h4>
                         </div>
                         <span className="text-[11px] text-[#78716C]">Vigencia: {docActual.fecha_vencimiento}</span>
                       </div>
 
-                      {/* Renderizado visual realista del documento escaneado según su tipo */}
-                      {docActual.tipo_visor_escaneo === 'CEDULA_COLOMBIA' && (
+                      {/* SI EL USUARIO SUBIÓ UN ARCHIVO REAL (PDF o IMAGEN), MOSTRAR EL ARCHIVO REAL EN EL VISOR */}
+                      {docActual.archivo_data_url && (
+                        <div className="space-y-2">
+                          <div className="px-3 py-1.5 rounded bg-[#F0FDF4] border border-[#BBF7D0] text-[11px] text-[#15803D] font-medium flex items-center justify-between">
+                            <span>✓ Visualizando archivo real cargado por el usuario ({docActual.archivo})</span>
+                            <a
+                              href={docActual.archivo_data_url}
+                              download={docActual.archivo || 'documento_notarial.pdf'}
+                              className="underline font-semibold"
+                            >
+                              Descargar original
+                            </a>
+                          </div>
+                          {(docActual.archivo_mime && docActual.archivo_mime.includes('pdf')) ||
+                          String(docActual.archivo || '').toLowerCase().endsWith('.pdf') ? (
+                            <iframe
+                              src={docActual.archivo_data_url}
+                              title={docActual.nombre}
+                              className="w-full h-96 rounded-xl border border-[#D6CFC2] bg-white"
+                            />
+                          ) : docActual.archivo_mime && docActual.archivo_mime.startsWith('image/') ? (
+                            <img
+                              src={docActual.archivo_data_url}
+                              alt={docActual.nombre}
+                              className="max-h-96 mx-auto rounded-xl border border-[#D6CFC2] object-contain bg-white p-2"
+                            />
+                          ) : null}
+                        </div>
+                      )}
+
+                      {/* Renderizado dinámico según tipo de documento cuando no hay PDF binario o como respaldo estructurado */}
+                      {!docActual.archivo_data_url && docActual.tipo_visor_escaneo === 'CEDULA_COLOMBIA' && (
                         <div className="p-5 rounded-xl bg-gradient-to-br from-[#F3EFE6] to-[#E5DFD3] border border-[#D6CFC2] shadow-inner space-y-3 text-xs">
                           <div className="flex items-center justify-between border-b border-[#C7BFA8] pb-2">
                             <span className="font-bold tracking-wider text-[11px] text-[#1C1917]">
@@ -1181,27 +2003,28 @@
                       {docActual.tipo_visor_escaneo === 'MINUTA_SELLOS_LINDEROS' && (
                         <div className="p-5 rounded-xl bg-[#F5F1E8] border border-[#D6CFC2] space-y-3 font-serif text-xs leading-relaxed relative">
                           <div className="flex items-center justify-between border-b border-[#D6CFC2] pb-2 font-sans text-[11px] text-[#78716C]">
-                            <span>ESCANEO ESCRITURA ANTECEDENTE No. 1.420 DE 2014 · NOTARÍA 19 BOGOTÁ</span>
+                            <span>ESCANEO ESCRITURA ANTECEDENTE · {docActual.archivo}</span>
                             <span className="px-2 py-0.5 rounded bg-[#FEF3C7] text-[#B45309] font-semibold">
-                              Escaneo antiguo con sellos
+                              Revisión de Linderos y Sellos
                             </span>
                           </div>
-                          <p className="text-[#1C1917]">
-                            "CLÁUSULA PRIMERA.- OBJETO Y LINDEROS: APARTAMENTO SEISCIENTOS UNO (601): Tiene su acceso por el hall del sexto piso... Tiene un área privada de{' '}
-                            <span className="inline-block px-2 py-0.5 rounded bg-blue-900/15 border border-blue-800/40 text-blue-950 font-bold">
-                              OCHENTA Y OCHO PUNTO CINCUENTA Y TRES [SELLO NOTARÍA 19: 88.53 / 88.58] M²
-                            </span>
-                            , coeficiente de copropiedad del 4.18% y se comprende dentro de los siguientes linderos especiales:
-                          </p>
-                          <p className="text-[#1C1917]">
-                            POR EL NORTE: En línea quebrada de ocho metros cuarenta y cinco centímetros (8.45 mts) con vacío sobre zona común exterior. POR EL SUR: En extensión de seis metros veinte centímetros (6.20 mts) con hall de circulación común. POR EL ORIENTE: En extensión de{' '}
-                            <span className="inline-block px-2 py-0.5 rounded bg-[#FEF3C7] border border-[#B45309] text-[#B45309] font-bold">
-                              nueve metros [MANCHA DE TÓNER: treinta 9.30 / ochenta 9.80] centímetros
-                            </span>{' '}
-                            con muro común que lo separa del apartamento 602. POR EL OCCIDENTE: En extensión de nueve metros treinta centímetros (9.30 mts)..."
-                          </p>
+                          {docActual.texto_extraido_crudo ? (
+                            <div className="p-3 rounded bg-white border border-[#D6CFC2] font-mono text-xs whitespace-pre-wrap max-h-56 overflow-y-auto">
+                              {docActual.texto_extraido_crudo}
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-[#1C1917]">
+                                "CLÁUSULA PRIMERA.- OBJETO Y LINDEROS DEL INMUEBLE ({cert.direccion_actual}): Tiene un área privada de{' '}
+                                <span className="inline-block px-2 py-0.5 rounded bg-blue-900/15 border border-blue-800/40 text-blue-950 font-bold">
+                                  [SELLO NOTARIAL SOBRE ÁREA Y LINDEROS]
+                                </span>{' '}
+                                y se comprende dentro de los linderos leídos en los campos del documento."
+                              </p>
+                            </>
+                          )}
 
-                          {/* Botones de confirmación rápida de los 2 linderos dudosos sobre la imagen */}
+                          {/* Botones de confirmación rápida de los linderos dudosos sobre la imagen */}
                           {caso.discrepancias_linderos && caso.discrepancias_linderos.length > 0 && (
                             <div className="pt-3 border-t border-[#D6CFC2] font-sans space-y-2">
                               <div className="text-[11px] font-semibold text-[#1C1917]">
@@ -1238,29 +2061,43 @@
                         </div>
                       )}
 
-                      {docActual.tipo_visor_escaneo === 'CERTIFICADO_SNR' && (
+                      {!docActual.archivo_data_url && docActual.tipo_visor_escaneo === 'CERTIFICADO_SNR' && (
                         <div className="p-5 rounded-xl bg-white border border-[#D6CFC2] space-y-2.5 font-mono text-xs">
                           <div className="font-bold text-[#1C1917] border-b border-[#E6E4DD] pb-2">
                             SUPERINTENDENCIA DE NOTARIADO Y REGISTRO · CERTIFICADO DE TRADICIÓN Y LIBERTAD
                           </div>
                           <div>NRO MATRÍCULA: {cert.matricula_inmobiliaria} · CHIP: {cert.chip}</div>
-                          <div>DIRECCIÓN: {cert.direccion_actual}</div>
-                          <div className="p-2.5 rounded bg-[#F7F6F2] border border-[#E6E4DD]">
-                            ANOTACIÓN NRO 14: COMPRAVENTA — A: TÉLLEZ RESTREPO MAURICIO ARTURO (C.C. 79.451.200) 50% Y PÉREZ GÓMEZ MÓNICA PATRICIA (C.C. 52.110.900) 50%.
-                          </div>
+                          <div>CÉDULA CATASTRAL: {cert.cedula_catastral} · ESTADO FOLIO: {cert.estado_folio}</div>
+                          <div>DIRECCIÓN DEL PREDIO: {cert.direccion_actual}</div>
+                          {docActual.texto_extraido_crudo ? (
+                            <div className="p-2.5 rounded bg-[#F7F6F2] border border-[#E6E4DD] whitespace-pre-wrap max-h-48 overflow-y-auto">
+                              {docActual.texto_extraido_crudo}
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {(cert.anotaciones_relevantes || []).map((a, idx) => (
+                                <div key={idx} className="p-2.5 rounded bg-[#F7F6F2] border border-[#E6E4DD]">
+                                  {a.numero} ({a.fecha}): {a.especificacion} — {a.personas}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
 
-                      {docActual.tipo_visor_escaneo === 'PAZ_Y_SALVO' && (
+                      {!docActual.archivo_data_url && docActual.tipo_visor_escaneo === 'PAZ_Y_SALVO' && (
                         <div className="p-5 rounded-xl bg-white border border-[#D6CFC2] space-y-2.5 text-xs">
                           <div className="font-bold text-[#1C1917] border-b border-[#E6E4DD] pb-2">
-                            ADMINISTRACIÓN EDIFICIO MIRADOR DEL PARQUE P.H. — CERTIFICADO DE PAZ Y SALVO
+                            SOPORTE DE PAZ Y SALVO · {docActual.nombre.toUpperCase()}
                           </div>
-                          <p>
-                            Certifica que el <strong>APARTAMENTO 601 Y GARAJE 14</strong> se encuentra a PAZ Y SALVO por todo concepto de cuotas de administración ordinarias y extraordinarias.
-                          </p>
+                          {docActual.campos_leidos_agente.map((c, idx) => (
+                            <div key={idx} className="flex justify-between border-b border-[#F0EFEA] py-1">
+                              <span className="text-[#78716C]">{c.clave}:</span>
+                              <span className="font-semibold text-[#1C1917] mono-data">{c.valor}</span>
+                            </div>
+                          ))}
                           <div className="p-2.5 rounded bg-[#FEF3C7]/60 border border-[#FDE68A] text-[#B45309] font-medium">
-                            Expedido el 25 de noviembre de 2026 · VÁLIDO ÚNICAMENTE HASTA EL 30 DE NOVIEMBRE DE 2026 (CIERRE DE MES).
+                            Vigencia registrada: {docActual.fecha_vencimiento} · {docActual.mensaje_alerta}
                           </div>
                         </div>
                       )}
@@ -1268,13 +2105,13 @@
                       {docActual.tipo_visor_escaneo === 'FALTANTE' && (
                         <div className="p-6 rounded-xl bg-[#FEF3C7]/40 border border-[#FDE68A] text-center space-y-3">
                           <div className="text-xs font-semibold text-[#B45309]">
-                            Este documento aún no ha sido cargado al expediente
+                            Este documento aún no ha sido cargado al expediente ({docActual.nombre})
                           </div>
                           <button
-                            onClick={() => ejecutarAccionBotonChat('SUBIR_CEDULA_MONICA')}
+                            onClick={() => abrirSelectorArchivoReal('ADJUNTAR_DOC', 'CEDULA', docActual.id)}
                             className="px-4 py-2 rounded-lg bg-[#1C1917] text-white text-xs font-medium"
                           >
-                            + Adjuntar Cédula de Mónica Pérez ahora
+                            📎 + Subir Archivo Real ({docActual.nombre}) desde mi PC
                           </button>
                         </div>
                       )}
@@ -1307,7 +2144,7 @@
                               <label className="font-medium text-[#78716C]">{campo.clave}</label>
                               {campo.dudoso && (
                                 <span className="text-[10px] px-2 py-0.5 rounded bg-[#FEF3C7] text-[#B45309] font-medium">
-                                  Revisar contra la imagen escaneada
+                                  Revisar contra el documento escaneado
                                 </span>
                               )}
                             </div>
@@ -1338,7 +2175,12 @@
                         </button>
                         <button
                           onClick={() => guardarYAprobarDocumento(docActual.id, true)}
-                          className="px-5 py-2 rounded-lg bg-[#1C1917] text-white text-xs font-medium hover:bg-black/85"
+                          disabled={docActual.estado !== 'CARGADO'}
+                          className={`px-5 py-2 rounded-lg text-xs font-medium ${
+                            docActual.estado !== 'CARGADO'
+                              ? 'bg-[#F0EFEA] text-[#78716C] cursor-not-allowed'
+                              : 'bg-[#1C1917] text-white hover:bg-black/85'
+                          }`}
                         >
                           ✓ Aprobar Lectura de este Documento
                         </button>
@@ -1363,7 +2205,13 @@
                         />
                         <button
                           onClick={() => avanzarFlujo('ENVIAR_A_IMPRESION')}
-                          className="px-3 py-1.5 rounded-lg bg-[#1C1917] text-white text-xs font-medium"
+                          disabled={!estadoBpmn.cliente_aprobo}
+                          title={!estadoBpmn.cliente_aprobo ? 'Bloqueado hasta completar Visto Bueno Abogado, Envío por Correo y Visto Bueno Clientes' : 'Imprimir y Cerrar Trámite'}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                            !estadoBpmn.cliente_aprobo
+                              ? 'bg-[#F0EFEA] text-[#78716C] border border-[#E6E4DD] cursor-not-allowed'
+                              : 'bg-[#1C1917] text-white'
+                          }`}
                         >
                           Imprimir y Cerrar Trámite
                         </button>
@@ -1777,14 +2625,66 @@
                     </form>
 
                     <div className="lg:col-span-8 bg-white p-6 rounded-xl border border-[#E6E4DD] space-y-4">
-                      <div className="flex items-center justify-between border-b border-[#E6E4DD] pb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E6E4DD] pb-3">
                         <div>
                           <h3 className="serif-editorial text-lg font-semibold text-[#1C1917]">
                             {proyecto.nombre_proyecto}
                           </h3>
                           <p className="text-xs text-[#78716C]">{proyecto.constructora} · NIT {proyecto.nit}</p>
                         </div>
+                        <select
+                          value={proyectoIdx}
+                          onChange={(e) => {
+                            setProyectoIdx(Number(e.target.value || 0));
+                            setUnidadSeleccionada(null);
+                          }}
+                          className="border border-[#E6E4DD] rounded-lg px-3 py-1.5 text-xs bg-[#FAF9F6]"
+                        >
+                          {data.proyectos_constructoras.map((p, idx) => (
+                            <option key={p.proyecto_id} value={idx}>
+                              Ver proyecto: {p.nombre_proyecto}
+                            </option>
+                          ))}
+                        </select>
                       </div>
+
+                      {unidadSeleccionada && (
+                        <div className="p-4 rounded-xl bg-[#FAF9F6] border border-[#1C1917] flex flex-wrap items-center justify-between gap-3 text-xs">
+                          <div>
+                            <div className="font-semibold text-[#1C1917]">
+                              Unidad seleccionada: {unidadSeleccionada.bloque} · Apartamento {unidadSeleccionada.apartamento} ({unidadSeleccionada.unidad_id})
+                            </div>
+                            <div className="text-[#78716C]">
+                              Matrícula: {unidadSeleccionada.matricula} · Comprador: {unidadSeleccionada.comprador} · Estado actual: <strong>{unidadSeleccionada.estado_dinamico}</strong>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {(proyecto.estados_personalizados || [
+                              '1. En recepción de documentos',
+                              '2. En estudio jurídico',
+                              '3. Listo para firma comprador',
+                              '4. Firmado por comprador',
+                              '5. Escritura cerrada'
+                            ]).map((est) => (
+                              <button
+                                key={est}
+                                onClick={() => {
+                                  cambiarEstadoUnidad(proyecto.proyecto_id, unidadSeleccionada.unidad_id, est);
+                                  setUnidadSeleccionada({ ...unidadSeleccionada, estado_dinamico: est });
+                                }}
+                                className={`px-2.5 py-1 rounded border text-[11px] ${
+                                  unidadSeleccionada.estado_dinamico === est
+                                    ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                                    : 'bg-white text-[#1C1917] border-[#E6E4DD]'
+                                }`}
+                              >
+                                {est}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         {proyecto.bloques_configurados.map((bloque) => (
                           <div key={bloque} className="p-4 rounded-xl bg-[#F7F6F2] border border-[#E6E4DD] space-y-2">
@@ -1796,10 +2696,16 @@
                                   <button
                                     key={u.unidad_id}
                                     onClick={() => setUnidadSeleccionada(u)}
-                                    className="p-2 rounded-lg bg-white border border-[#E6E4DD] text-left text-xs"
+                                    className={`p-2 rounded-lg border text-left text-xs transition ${
+                                      unidadSeleccionada && unidadSeleccionada.unidad_id === u.unidad_id
+                                        ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                                        : 'bg-white text-[#1C1917] border-[#E6E4DD] hover:border-[#1C1917]'
+                                    }`}
                                   >
                                     <div className="mono-data font-semibold">{u.unidad_id}</div>
-                                    <div className="text-[10px] text-[#78716C] truncate">{u.estado_dinamico}</div>
+                                    <div className={`text-[10px] truncate ${unidadSeleccionada && unidadSeleccionada.unidad_id === u.unidad_id ? 'text-[#E6E4DD]' : 'text-[#78716C]'}`}>
+                                      {u.estado_dinamico}
+                                    </div>
                                   </button>
                                 ))}
                             </div>

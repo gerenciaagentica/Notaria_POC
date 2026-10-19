@@ -377,10 +377,12 @@ const initialStore = {
           estado_civil: 'Casado con sociedad conyugal vigente',
           genero: 'M',
           porcentaje: 50,
+          correo_electronico: 'mauricio.tellez@correo.co',
           origen_inferencia: 'Identificado como VENDEDOR por ser el primer propietario inscrito en la Anotación #14 del Certificado de Libertad y Tradición.',
           cedula_cargada: true,
           aprobado_verificador: true,
           aprobado_por: 'Dr. Carlos Salamanca',
+          borrador_enviado: false,
           visto_bueno_cliente: false
         },
         {
@@ -392,10 +394,12 @@ const initialStore = {
           estado_civil: 'Casada con sociedad conyugal vigente',
           genero: 'F',
           porcentaje: 50,
+          correo_electronico: 'monica.perez@correo.co',
           origen_inferencia: 'Identificada como co-propietaria VENDEDORA en la Anotación #14 del Certificado de Libertad y Tradición. ¡FALTA SUBIR SU CÉDULA!',
           cedula_cargada: false,
           aprobado_verificador: false,
           aprobado_por: '',
+          borrador_enviado: false,
           visto_bueno_cliente: false
         },
         {
@@ -407,10 +411,12 @@ const initialStore = {
           estado_civil: 'Soltero sin unión marital de hecho',
           genero: 'M',
           porcentaje: 100,
+          correo_electronico: 'jorge.mosquera@correo.co',
           origen_inferencia: 'Identificado como COMPRADOR porque su cédula fue adjuntada y no aparece como propietario anterior en el Certificado de Tradición.',
           cedula_cargada: true,
           aprobado_verificador: false,
           aprobado_por: '',
+          borrador_enviado: false,
           visto_bueno_cliente: false
         }
       ],
@@ -1070,13 +1076,280 @@ function getUsuarioActivo(store) {
   return store.usuarios_temporales.find((u) => u.usuario_id === store.usuario_activo_id) || store.usuarios_temporales[2];
 }
 
+function extraerDatosDeTextoDocumento(texto, nombreArchivo) {
+  const raw = String(texto || '') + ' ' + String(nombreArchivo || '');
+  const chipMatch = raw.match(/AAA[0-9A-Z]{7,8}/i);
+  const matMatch = raw.match(/50[A-Z]-[0-9]{5,9}(?:-[0-9]{1,4})?/i) || raw.match(/(?:MATR[IÍ]CULA|FOLIO)[^0-9A-Z]{0,15}([0-9A-Z]{2,4}-[0-9]{4,9})/i);
+  const catMatch = raw.match(/\b\d{14,20}\b/);
+  const dirMatch = raw.match(/(?:DIRECCI[OÓ]N(?:\s+DEL\s+INMUEBLE)?|UBICACI[OÓ]N)[:\s]+([^\n\r]{8,90}?)(?=\s+(?:A:|DE:|PROPIETARIO|TITULAR|CHIP|MATR|$))/i) || raw.match(/(?:DIRECCI[OÓ]N(?:\s+DEL\s+INMUEBLE)?|UBICACI[OÓ]N)[:\s]+([^\n\r]{8,90})/i) || raw.match(/((?:CALLE|CARRERA|DIAGONAL|TRANSVERSAL|AVENIDA|CL|KR|CR|DG|TV)\s+[0-9A-Z#\-.\s]{6,65})/i);
+  const cedulas = Array.from(new Set((raw.match(/\b\d{1,3}(?:\.\d{3}){2}\b|\b\d{7,10}\b/g) || []).filter((n) => n.replace(/\./g, '').length >= 7 && n.replace(/\./g, '').length <= 10)));
+  const propMatch = raw.match(/(?:A:|PROPIETARIO(?:S)?|TITULAR(?:ES)?|DE:)[:\s]+([A-ZÁÉÍÓÚÑ\s]{4,60}?)(?=\s+(?:CC|C\.C\.|CEDULA|CÉDULA|NIT|\d|$))/i) || raw.match(/(?:A:|PROPIETARIO(?:S)?|TITULAR(?:ES)?|DE:)[:\s]+([A-ZÁÉÍÓÚÑ\s]{6,60})/i);
+
+  return {
+    chip: chipMatch ? chipMatch[0].toUpperCase() : '',
+    matricula: matMatch ? (matMatch[1] || matMatch[0]).toUpperCase() : '',
+    cedula_catastral: catMatch ? catMatch[0] : '',
+    direccion: dirMatch ? (dirMatch[1] || dirMatch[0]).trim() : '',
+    cedula_detectada: cedulas[0] || '',
+    nombre_detectado: propMatch ? propMatch[1].replace(/\b(?:CC|C\.C\.|CEDULA|CÉDULA)\b.*$/i, '').trim().toUpperCase() : ''
+  };
+}
+
+function crearCasoLimpioDesdeCertificado(params, usuarioActivo, store) {
+  const ahoraHora = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+  const hoyIso = new Date().toISOString().split('T')[0];
+  const venceIso = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  const tramiteCat =
+    (store.catalogo_tramites || []).find(
+      (t) =>
+        t.tramite_id === params.tramite_id ||
+        t.codigo_corto === params.tipo_corto ||
+        (params.tipo_tramite && t.nombre.toLowerCase().includes(String(params.tipo_tramite).toLowerCase()))
+    ) || store.catalogo_tramites[0];
+
+  const tipoCorto = tramiteCat.codigo_corto || 'COMPRAVENTA';
+  const chipLimpio = String(params.chip || '').toUpperCase().trim();
+  const matriculaLimpia = String(params.matricula || '').toUpperCase().trim();
+  const nombreProp = String(params.nombre_propietario || '').toUpperCase().trim();
+  const apellidoCode = String(
+    params.apellido ||
+      (nombreProp ? nombreProp.split(/\s+/)[0] : '') ||
+      'TITULAR'
+  )
+    .toUpperCase()
+    .replace(/[^A-ZÑ0-9]/g, '');
+
+  const cedulaProp = String(params.cedula || '').trim();
+  const correoProp = String(params.correo_electronico || '').trim();
+  const direccionPredio = String(params.direccion || 'Predio según Certificado de Libertad y Tradición adjunto').trim();
+  const cedulaCatastral = String(params.cedula_catastral || 'Segun Certificado SNR').trim();
+  const valorActo = Number(params.valor_venta || 0);
+  const subcategorias = Array.isArray(params.subcategorias_activas) && params.subcategorias_activas.length
+    ? params.subcategorias_activas
+    : (tramiteCat.categorias || []).slice(0, 1).map((c) => c.categoria_id);
+
+  const codigoTramite = `${tipoCorto}-${chipLimpio}-${apellidoCode}`;
+  const nuevoId = 'caso-' + Date.now();
+
+  const docsIniciales = [
+    {
+      id: 'doc-1',
+      codigo_tipo: 'CERTIFICADO_TRADICION',
+      nombre: `Certificado de Tradición y Libertad (${matriculaLimpia || chipLimpio})`,
+      archivo: params.archivo_nombre || `certificado_tradicion_${chipLimpio}.pdf`,
+      archivo_data_url: params.archivo_data_url || '',
+      tipo_mime: params.tipo_mime || 'application/pdf',
+      texto_extraido: params.texto_extraido || '',
+      fecha_expedicion: hoyIso,
+      fecha_vencimiento: venceIso,
+      dias_restantes: 90,
+      estado: 'PENDIENTE_APROBACION_ABOGADO',
+      nivel_alerta: 'WARNING',
+      aprobado_abogado: false,
+      aprobado_por: '',
+      fecha_aprobacion: '',
+      mensaje_alerta: `Certificado de Libertad y Tradición adjuntado (${params.archivo_nombre || 'Archivo real'}). Pendiente que el Abogado Verificador apruebe su lectura en la Ficha.`,
+      tipo_visor_escaneo: 'CERTIFICADO_SNR',
+      campos_leidos_agente: [
+        { clave: 'Matrícula Inmobiliaria', valor: matriculaLimpia || 'Por verificar en documento', dudoso: !matriculaLimpia },
+        { clave: 'Código CHIP', valor: chipLimpio, dudoso: false },
+        { clave: 'Cédula Catastral', valor: cedulaCatastral, dudoso: false },
+        { clave: 'Dirección del Predio', valor: direccionPredio, dudoso: false },
+        { clave: 'Primer Propietario / Titular (Vendedor)', valor: `${nombreProp} · C.C. ${cedulaProp}`, dudoso: false },
+        { clave: 'Estado del Folio', valor: 'ACTIVO · Verificado en apertura', dudoso: false }
+      ]
+    },
+    {
+      id: 'doc-2',
+      codigo_tipo: 'CEDULA_VENDEDOR_1',
+      nombre: `Cédula de Ciudadanía Propietario / Otorgante · ${nombreProp} (PENDIENTE DE SUBIR)`,
+      archivo: 'PENDIENTE DE ADJUNTAR ARCHIVO',
+      archivo_data_url: '',
+      fecha_vencimiento: 'SIN_VENCIMIENTO',
+      estado: 'FALTA_DOCUMENTO',
+      nivel_alerta: 'CRITICAL',
+      aprobado_abogado: false,
+      aprobado_por: '',
+      mensaje_alerta: `ALARMA DOCUMENTO FALTANTE: Falta adjuntar el archivo de la Cédula de ${nombreProp} (C.C. ${cedulaProp}).`,
+      tipo_visor_escaneo: 'FALTANTE',
+      campos_leidos_agente: [
+        { clave: 'Titular Requerido por Certificado de Tradición', valor: nombreProp, dudoso: true },
+        { clave: 'Número de Cédula', valor: cedulaProp, dudoso: true }
+      ]
+    }
+  ];
+
+  return {
+    id: nuevoId,
+    codigo_tramite: codigoTramite,
+    titulo_tramite: `${tramiteCat.nombre} · ${nombreProp} · CHIP ${chipLimpio}`,
+    estado_apertura: 'ABIERTO',
+    estado_tramite: 'ABIERTO',
+    radicado: 'NOT-2026-' + Math.floor(1000 + Math.random() * 8999),
+    tramite_id: tramiteCat.tramite_id,
+    tramite_nombre: tramiteCat.nombre,
+    subcategorias_activas: subcategorias,
+    pertenece_constructora: false,
+    constructora_info: {
+      proyecto_id: '',
+      nombre_proyecto: '',
+      torre_bloque: '',
+      apartamento: ''
+    },
+    etapa_actual: 'REVISION_DOCUMENTOS_Y_ALERTAS',
+    fecha_creacion: new Date().toLocaleString('es-CO'),
+    creado_por: `${usuarioActivo.nombre} (${usuarioActivo.cargo})`,
+    certificado_tradicion: {
+      matricula_inmobiliaria: matriculaLimpia || 'EN_REVISION',
+      chip: chipLimpio,
+      cedula_catastral: cedulaCatastral,
+      circulo_registral: '50C - BOGOTÁ D.C.',
+      departamento_municipio: 'BOGOTÁ D.C.',
+      estado_folio: 'ACTIVO',
+      fecha_expedicion: hoyIso,
+      hora_expedicion: ahoraHora,
+      pin_snr: 'SNR-' + Date.now(),
+      direccion_actual: direccionPredio.toUpperCase(),
+      direcciones_anteriores: [],
+      tipo_predio: 'URBANO',
+      complementacion_resumen: 'Extraída del Certificado de Libertad y Tradición adjuntado por el usuario.',
+      cabida_y_linderos_certificado: 'Según título antecedente citado en el Certificado de Tradición.',
+      salvedades: 'NINGUNA.',
+      gravamenes_vigentes: 'NINGUNO VIGENTE',
+      anotaciones_relevantes: [
+        {
+          numero: 1,
+          fecha: hoyIso,
+          radicacion: 'SNR-ACT',
+          documento: 'Certificado de Libertad y Tradición Adjunto',
+          especificacion: 'TITULARIDAD DE DOMINIO INSCRITA',
+          personas_que_intervienen: `A: ${nombreProp} (C.C. ${cedulaProp}) — 100% (PROPIETARIO ACTUAL - X)`
+        }
+      ]
+    },
+    inmueble: {
+      tipo_inmueble: 'INMUEBLE URBANO',
+      direccion: direccionPredio,
+      edificio_conjunto: '',
+      matricula_inmobiliaria: matriculaLimpia || 'EN_REVISION',
+      cedula_catastral: cedulaCatastral,
+      chip: chipLimpio,
+      localidad_barrio: 'Bogotá D.C.',
+      area_privada_m2: '',
+      coeficiente_copropiedad: '',
+      linderos_especiales: 'Por verificar o transcribir de la Escritura Pública antecedente.',
+      linderos_generales: 'Según Reglamento o Escritura antecedente.',
+      tradicion_antecedente: `Adquirido según consta en el Certificado de Libertad y Tradición matrícula ${matriculaLimpia || chipLimpio}.`,
+      propiedad_horizontal_constituida: ''
+    },
+    negocio: {
+      valor_venta: valorActo,
+      avaluo_catastral: 0,
+      forma_pago: 'CONTADO',
+      entidad_financiera: 'NO APLICA',
+      valor_recursos_propios: valorActo,
+      valor_credito: 0,
+      afectacion_vivienda_familiar: false
+    },
+    recibos_fiscales: {
+      predial_factura: 'PENDIENTE',
+      predial_referencia: 'PENDIENTE',
+      predial_banco: 'PENDIENTE',
+      predial_fecha: hoyIso,
+      idu_pin: 'PENDIENTE',
+      idu_consecutivo: 'PENDIENTE',
+      idu_vencimiento: venceIso,
+      vur_cadena_seguridad: 'PENDIENTE',
+      vur_fecha_hora: ahoraHora
+    },
+    partes: [
+      {
+        id: 'p-1',
+        rol: 'VENDEDOR',
+        nombres_completos: nombreProp,
+        numero_documento: cedulaProp,
+        lugar_expedicion: 'Colombia',
+        estado_civil: 'Por confirmar en Cédula / Minuta',
+        genero: 'M',
+        porcentaje: 100,
+        correo_electronico: correoProp,
+        origen_inferencia: `Extraído del Certificado de Libertad y Tradición adjunto (${params.archivo_nombre || 'Certificado SNR'}).`,
+        cedula_cargada: false,
+        aprobado_verificador: false,
+        aprobado_por: '',
+        borrador_enviado: false,
+        visto_bueno_cliente: false
+      }
+    ],
+    documentos: docsIniciales,
+    discrepancias_linderos: [],
+    aprobaciones: {
+      linderos_aprobados_abogado: true,
+      visto_bueno_juridico_abogado: false,
+      abogado_que_aprobo: '',
+      fecha_aprobacion_abogado: '',
+      enviado_a_clientes: false,
+      fecha_envio_clientes: '',
+      correos_notificados: [],
+      visto_bueno_vendedores: false,
+      visto_bueno_compradores: false,
+      en_impresion: false,
+      hojas_papel_notarial: 'PENDIENTE ASIGNACIÓN',
+      numero_escritura_asignada: 'PENDIENTE',
+      firma_completada: false
+    },
+    mensajes_chat: [
+      {
+        id: 'm-new-1',
+        emisor: 'ASISTENTE',
+        autor: 'Asistente Notarial',
+        hora: ahoraHora,
+        texto: `He recibido tu archivo "${params.archivo_nombre || 'Certificado de Tradición'}" y abrí el trámite ${codigoTramite}. Ya puedes ver el documento adjunto en la Ficha del Trámite o subir las cédulas y soportes restantes.`,
+        hallazgos: [
+          `Código asignado: ${codigoTramite} (Estado: ABIERTO)`,
+          `Matrícula: ${matriculaLimpia || 'Por confirmar'} · CHIP: ${chipLimpio} · Dirección: ${direccionPredio}`,
+          `Propietario / Titular detectado: ${nombreProp} (C.C. ${cedulaProp})`
+        ],
+        alertas_rojas: [
+          `Falta adjuntar la Cédula de Ciudadanía de ${nombreProp} (C.C. ${cedulaProp}) y aprobar el Certificado en la Ficha.`
+        ],
+        preguntas_pendientes: [
+          '¿Este trámite pertenece a algún proyecto de Constructora? Si aplica, indícalo para vincular Torre y Apartamento.'
+        ],
+        tarjetas_tramites: [],
+        acciones_sugeridas: [
+          { tipo: 'VER_FICHA_TRAMITE', etiqueta: `Ver Ficha y Documento Subido (${codigoTramite})` },
+          { tipo: 'ABRIR_MODAL_SUBIR_ARCHIVO', etiqueta: '📎 Adjuntar otro Documento (Cédula / Paz y Salvo / Minuta)' }
+        ]
+      }
+    ],
+    bitacora: [
+      {
+        id: 'ev-open-' + Date.now(),
+        fecha: new Date().toLocaleString('es-CO'),
+        actor: `${usuarioActivo.nombre} (${usuarioActivo.cargo})`,
+        etapa: 'Apertura con Certificado de Libertad y Tradición',
+        detalle: `Abrió el trámite ${codigoTramite} adjuntando el archivo "${params.archivo_nombre || 'Certificado SNR'}" (CHIP ${chipLimpio}).`
+      }
+    ]
+  };
+}
+
 function calcularEstadoBpmn(caso) {
-  const faltaCedula = caso.partes.some((p) => !p.cedula_cargada);
+  const faltaCedula = (caso.partes || []).some((p) => !p.cedula_cargada);
+  const docsFaltantes = (caso.documentos || []).filter((d) => d.estado === 'FALTA_DOCUMENTO' || d.tipo_visor_escaneo === 'FALTANTE');
+  const docsSinAprobar = (caso.documentos || []).filter((d) => !d.aprobado_abogado);
   const dudasLinderos = (caso.discrepancias_linderos || []).filter((d) => d.estado === 'PENDIENTE_HUMANO');
-  const docsCompletos = !faltaCedula;
+
+  const docsCompletos = !faltaCedula && docsFaltantes.length === 0;
+  const todosDocsAprobados = docsCompletos && docsSinAprobar.length === 0;
   const linderosListos = dudasLinderos.length === 0;
   const abogadoAprobo = Boolean(caso.aprobaciones.visto_bueno_juridico_abogado);
-  const clienteAprobo = Boolean(caso.aprobaciones.visto_bueno_vendedores && caso.aprobaciones.visto_bueno_compradores);
+  const enviadoAClientes = Boolean(caso.aprobaciones.enviado_a_clientes);
+  const partesSinCorreo = (caso.partes || []).filter((p) => !p.correo_electronico || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.correo_electronico));
+  const todosConCorreo = partesSinCorreo.length === 0;
+  const clienteAprobo = Boolean(enviadoAClientes && caso.aprobaciones.visto_bueno_vendedores && caso.aprobaciones.visto_bueno_compradores);
   const impreso = Boolean(caso.aprobaciones.en_impresion || caso.aprobaciones.firma_completada || caso.estado_apertura === 'CERRADO');
 
   let pasoActualNumero = 1;
@@ -1084,19 +1357,30 @@ function calcularEstadoBpmn(caso) {
 
   if (!docsCompletos) {
     pasoActualNumero = 1;
-    siguienteAccion = { tipo: 'SUBIR_CEDULA_MONICA', etiqueta: 'Adjuntar Cédula Faltante (Mónica Pérez)' };
+    siguienteAccion = { tipo: 'ABRIR_MODAL_SUBIR_ARCHIVO', etiqueta: '📎 Adjuntar Documento Faltante desde tu Computador' };
   } else if (docsCompletos && !linderosListos) {
     pasoActualNumero = 2;
-    siguienteAccion = { tipo: 'VER_FICHA_TRAMITE', etiqueta: `Ver Trámite y Aprobar Linderos (${dudasLinderos.length} con sello)` };
+    siguienteAccion = { tipo: 'VER_FICHA_TRAMITE', etiqueta: `Ver Trámite y Aprobar Linderos (${dudasLinderos.length} pendientes)` };
   } else if (docsCompletos && linderosListos && !abogadoAprobo) {
     pasoActualNumero = 3;
-    siguienteAccion = { tipo: 'APROBAR_ABOGADO', etiqueta: 'Dar Visto Bueno de Abogado Verificador' };
-  } else if (docsCompletos && linderosListos && abogadoAprobo && !clienteAprobo) {
+    siguienteAccion = {
+      tipo: 'APROBAR_ABOGADO',
+      etiqueta: todosDocsAprobados
+        ? '1. Dar Visto Bueno Jurídico del Abogado Verificador'
+        : `Ver Ficha y Aprobar Documentos (${docsSinAprobar.length} pendientes de visto bueno)`
+    };
+  } else if (docsCompletos && linderosListos && abogadoAprobo && !enviadoAClientes) {
     pasoActualNumero = 4;
-    siguienteAccion = { tipo: 'APROBAR_CLIENTES', etiqueta: 'Registrar Visto Bueno del Cliente' };
-  } else if (docsCompletos && linderosListos && abogadoAprobo && clienteAprobo && !impreso) {
+    siguienteAccion = {
+      tipo: 'ENVIAR_BORRADOR_CLIENTES',
+      etiqueta: '2. Confirmar Correos y Enviar Borrador a Clientes'
+    };
+  } else if (docsCompletos && linderosListos && abogadoAprobo && enviadoAClientes && !clienteAprobo) {
     pasoActualNumero = 5;
-    siguienteAccion = { tipo: 'IMPRIMIR_ESCRITURA', etiqueta: 'Asignar Papel Notarial, Imprimir y Cerrar Trámite' };
+    siguienteAccion = { tipo: 'APROBAR_CLIENTES', etiqueta: '3. Registrar Visto Bueno de los Clientes (Ya enviado por correo)' };
+  } else if (docsCompletos && linderosListos && abogadoAprobo && enviadoAClientes && clienteAprobo && !impreso) {
+    pasoActualNumero = 6;
+    siguienteAccion = { tipo: 'IMPRIMIR_ESCRITURA', etiqueta: '4. Asignar Papel Notarial, Imprimir y Cerrar Trámite' };
   } else if (impreso) {
     pasoActualNumero = 6;
     siguienteAccion = { tipo: 'VER_FICHA_TRAMITE', etiqueta: 'Ver Ficha del Trámite Cerrado' };
@@ -1105,9 +1389,17 @@ function calcularEstadoBpmn(caso) {
   return {
     paso_actual_numero: pasoActualNumero,
     docs_completos: docsCompletos,
+    todos_docs_aprobados: todosDocsAprobados,
+    docs_aprobados_individualmente: todosDocsAprobados,
+    docs_pendientes_aprobacion: docsSinAprobar.length,
     linderos_listos: linderosListos,
     dudas_linderos_pendientes: dudasLinderos.length,
     abogado_aprobo: abogadoAprobo,
+    enviado_a_clientes: enviadoAClientes,
+    todos_con_correo: todosConCorreo,
+    partes_sin_correo: partesSinCorreo.map((p) => p.nombres_completos),
+    correos_notificados: caso.aprobaciones.correos_notificados || [],
+    fecha_envio_clientes: caso.aprobaciones.fecha_envio_clientes || '',
     cliente_aprobo: clienteAprobo,
     impreso,
     siguiente_accion: siguienteAccion
@@ -1139,30 +1431,48 @@ function calcularLiquidacion(valorVenta, avaluoCatastral) {
 }
 
 function generarTextoMinuta(caso) {
-  const vendedores = caso.partes.filter((p) => p.rol === 'VENDEDOR');
-  const compradores = caso.partes.filter((p) => p.rol === 'COMPRADOR');
-  const liq = calcularLiquidacion(caso.negocio.valor_venta, caso.negocio.avaluo_catastral);
+  const vendedores = (caso.partes || []).filter((p) => p.rol === 'VENDEDOR');
+  const compradores = (caso.partes || []).filter((p) => p.rol === 'COMPRADOR');
+  const liq = calcularLiquidacion(caso.negocio?.valor_venta, caso.negocio?.avaluo_catastral);
 
-  const resumenVend = vendedores.map((v) => `${v.nombres_completos} · C.C. ${v.numero_documento}`).join('\n');
-  const resumenComp = compradores.map((c) => `${c.nombres_completos} · C.C. ${c.numero_documento}`).join('\n') || 'NO APLICA';
+  const resumenVend = vendedores.map((v) => `${v.nombres_completos} · C.C. ${v.numero_documento} (${v.correo_electronico || 'Sin correo'})`).join('\n');
+  const resumenComp = compradores.map((c) => `${c.nombres_completos} · C.C. ${c.numero_documento} (${c.correo_electronico || 'Sin correo'})`).join('\n') || 'PENDIENTE DE VINCULAR COMPRADOR';
 
   const compVend = vendedores
     .map(
       (v) =>
-        `${v.nombres_completos}, mayor de edad, ${v.genero === 'F' ? 'vecina' : 'vecino'} de Bogotá D.C., ${v.genero === 'F' ? 'identificada' : 'identificado'} con C.C. No. ${v.numero_documento} expedida en ${v.lugar_expedicion}, estado civil ${v.estado_civil} (${v.porcentaje}%)`
+        `${v.nombres_completos}, mayor de edad, ${v.genero === 'F' ? 'vecina' : 'vecino'} de Bogotá D.C., ${v.genero === 'F' ? 'identificada' : 'identificado'} con C.C. No. ${v.numero_documento} expedida en ${v.lugar_expedicion}, estado civil ${v.estado_civil} (${Number(v.porcentaje || 0)}%)`
     )
     .join('; y ');
 
   const compComp = compradores
     .map(
       (c) =>
-        `${c.nombres_completos}, mayor de edad, ${c.genero === 'F' ? 'vecina' : 'vecino'} de Bogotá D.C., ${c.genero === 'F' ? 'identificada' : 'identificado'} con C.C. No. ${c.numero_documento} expedida en ${c.lugar_expedicion}, estado civil ${c.estado_civil} (${c.porcentaje}%)`
+        `${c.nombres_completos}, mayor de edad, ${c.genero === 'F' ? 'vecina' : 'vecino'} de Bogotá D.C., ${c.genero === 'F' ? 'identificada' : 'identificado'} con C.C. No. ${c.numero_documento} expedida en ${c.lugar_expedicion}, estado civil ${c.estado_civil} (${Number(c.porcentaje || 0)}%)`
     )
     .join('; y ');
 
   const clausulaConstructora = caso.pertenece_constructora
     ? `\nPROYECTO DE CONSTRUCTORA VINCULADO: ${caso.constructora_info.nombre_proyecto} · ${caso.constructora_info.torre_bloque} · Apartamento ${caso.constructora_info.apartamento}.`
     : '';
+
+  const subcats = caso.subcategorias_activas || [];
+  const clausulasSubcategorias = [];
+  if (subcats.includes('SUB-PH-ADMIN')) {
+    clausulasSubcategorias.push(
+      `CLÁUSULA DE PROPIEDAD HORIZONTAL Y PAZ Y SALVO DE ADMINISTRACIÓN (SUB-PH-ADMIN): El inmueble objeto de este acto se encuentra sometido al Régimen de Propiedad Horizontal (Ley 675 de 2001). Se protocoliza el Paz y Salvo de Administración vigente al mes de otorgamiento.`
+    );
+  }
+  if (subcats.includes('SUB-PRENDA-HIPOTECA')) {
+    clausulasSubcategorias.push(
+      `CLÁUSULA DE FINANCIACIÓN / HIPOTECA (SUB-PRENDA-HIPOTECA): Forma de pago: ${caso.negocio?.forma_pago || 'CREDITO'} con entidad financiera ${caso.negocio?.entidad_financiera || 'Acreedor Hipotecario'} por valor de $${Number(caso.negocio?.valor_credito || 0).toLocaleString('es-CO')}.`
+    );
+  }
+  if (subcats.includes('SUB-VARIAS-PERSONAS')) {
+    clausulasSubcategorias.push(
+      `CLÁUSULA DE PLURALIDAD DE OTORGANTES (SUB-VARIAS-PERSONAS): Comparecen múltiples titulares de derecho de dominio conforme a los porcentajes verificados frente al Certificado de Libertad y Tradición.`
+    );
+  }
 
   return `REPÚBLICA DE COLOMBIA
 NOTARÍA TREINTA Y TRES (33) DEL CÍRCULO DE BOGOTÁ D.C.
@@ -1171,7 +1481,7 @@ ESCRITURA PÚBLICA NÚMERO: ${caso.aprobaciones.numero_escritura_asignada}
 DE FECHA: ${new Date().toLocaleDateString('es-CO')} · AÑO DOS MIL VEINTISÉIS (2026)
 -----------------------------------------------------------------------------------------
 ACTO NOTARIAL: ${caso.tramite_nombre}
-SUBCATEGORÍAS APLICADAS: ${(caso.subcategorias_activas || []).join(' + ')}${clausulaConstructora}
+SUBCATEGORÍAS APLICADAS: ${subcats.join(' + ')}${clausulaConstructora}
 VALOR DEL ACTO: $${Number((caso.negocio && caso.negocio.valor_venta) || 0).toLocaleString('es-CO')}
 -----------------------------------------------------------------------------------------
 PARTE VENDEDORA / OTORGANTE (Extraída del Certificado de Libertad y Tradición):
@@ -1192,11 +1502,14 @@ LINDEROS GENERALES:
 ${caso.inmueble.linderos_generales}
 -----------------------------------------------------------------------------------------
 CUARTA. - TRADICIÓN ANTECEDENTE: ${caso.inmueble.tradicion_antecedente}
+${clausulasSubcategorias.length ? '-----------------------------------------------------------------------------------------\n' + clausulasSubcategorias.join('\n\n') : ''}
 -----------------------------------------------------------------------------------------
-APROBACIÓN Y PAPEL DE SEGURIDAD NOTARIAL (RESOLUCIÓN 964 DE 2026):
-Abogado que Cargó el Trámite: ${caso.creado_por || 'Laura Gómez'}
-Abogado Verificador que Aprobó: ${caso.aprobaciones.abogado_que_aprobo || 'Pendiente de aprobación'}
-Folios de Papel Notarial Utilizados: ${caso.aprobaciones.hojas_papel_notarial}
+CADENA DE APROBACIÓN BPMN Y PAPEL DE SEGURIDAD NOTARIAL (RESOLUCIÓN 964 DE 2026):
+1. Abogado que Radicó / Cargó: ${caso.creado_por || 'Laura Gómez'}
+2. Visto Bueno Jurídico Abogado Verificador: ${caso.aprobaciones.visto_bueno_juridico_abogado ? `APROBADO por ${caso.aprobaciones.abogado_que_aprobo} (${caso.aprobaciones.fecha_aprobacion_abogado})` : 'PENDIENTE'}
+3. Envío de Borrador por Correo a Clientes: ${caso.aprobaciones.enviado_a_clientes ? `ENVIADO (${caso.aprobaciones.fecha_envio_clientes}) a ${(caso.aprobaciones.correos_notificados || []).join(', ')}` : 'NO ENVIADO AÚN'}
+4. Visto Bueno de Clientes Otorgantes: ${caso.aprobaciones.visto_bueno_vendedores && caso.aprobaciones.visto_bueno_compradores ? 'APROBADO POR VENDEDORES Y COMPRADORES' : 'PENDIENTE'}
+5. Folios de Papel Notarial Utilizados: ${caso.aprobaciones.hojas_papel_notarial}
 Derechos Notariales: $${liq.derechos_notariales.toLocaleString('es-CO')} | IVA: $${liq.iva_notarial.toLocaleString('es-CO')} | Retención en la Fuente (1%): $${liq.retencion_fuente_vendedor.toLocaleString('es-CO')}
 
 DIANA BEATRIZ LÓPEZ DURAN
@@ -1370,7 +1683,9 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && pathname === '/api/caso/seleccionar') {
     const body = await parseJsonBody(req);
     const store = loadStore();
-    const encontrado = store.casos.find((c) => c.id === body.caso_id || c.codigo_tramite === body.codigo_tramite);
+    const encontrado = store.casos.find(
+      (c) => c.id === body.caso_id || c.codigo_tramite === body.caso_id || c.codigo_tramite === body.codigo_tramite
+    );
     if (encontrado) {
       store.caso_activo_id = encontrado.id;
       saveStore(store);
@@ -1400,7 +1715,339 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // ENDPOINT DE CHAT INTELIGENTE: Busca trámites por cédula/CHIP/nombre, valida duplicados abiertos, crea trámites con Certificado de Tradición y vincula Constructoras
+  // ENDPOINT PARA SUBIR UN ARCHIVO REAL DESDE EL COMPUTADOR DEL USUARIO (Certificado de Libertad y Tradición, Cédula, Paz y Salvo, Escritura Anterior)
+  if (req.method === 'POST' && pathname === '/api/documento/subir') {
+    const body = await parseJsonBody(req);
+    const store = loadStore();
+    let caso = getCasoActivo(store);
+    const usuarioActivo = getUsuarioActivo(store);
+    const ahoraHora = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+    const hoyIso = new Date().toISOString().split('T')[0];
+
+    const extraido = extraerDatosDeTextoDocumento(body.texto_extraido || '', body.archivo_nombre || '');
+    const rawTipo = (body.codigo_tipo || body.tipo_documento || 'CERTIFICADO_TRADICION').toUpperCase();
+    const tipoDoc = rawTipo === 'CEDULA' ? 'CEDULA_CIUDADANIA' : rawTipo;
+    const nombrePropBody = body.nombre_propietario || body.propietario_nombre || '';
+    const cedulaBody = body.cedula || body.propietario_cedula || '';
+    const mimeBody = body.tipo_mime || body.archivo_mime || 'application/pdf';
+
+    // Si el usuario está subiendo un Certificado de Libertad y Tradición para ABRIR un trámite nuevo
+    if (
+      body.accion_apertura === 'ABRIR_TRAMITE_NUEVO' ||
+      body.modo === 'ABRIR_TRAMITE' ||
+      body.modo === 'ABRIR_TRAMITE_NUEVO' ||
+      (tipoDoc === 'CERTIFICADO_TRADICION' && body.abrir_tramite_nuevo)
+    ) {
+      const chipReal = (body.chip || extraido.chip || '').toUpperCase().trim();
+      const matriculaReal = (body.matricula || extraido.matricula || '').toUpperCase().trim();
+      const cedulaReal = (cedulaBody || extraido.cedula_detectada || '').trim();
+      const nombrePropReal = (nombrePropBody || extraido.nombre_detectado || '').toUpperCase().trim();
+      const apellidoReal = (body.apellido || (nombrePropReal ? nombrePropReal.split(/\s+/)[0] : '') || '').toUpperCase().trim();
+
+      if (!chipReal && !matriculaReal) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: 'Por favor confirma el CHIP o la Matrícula Inmobiliaria del Certificado de Libertad y Tradición que estás adjuntando.'
+        });
+      }
+      if (!nombrePropReal || !cedulaReal) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: 'Por favor confirma el Nombre/Apellido y la Cédula del primer propietario que aparece en el Certificado de Libertad y Tradición.'
+        });
+      }
+
+      const llavePredio = chipReal || matriculaReal;
+      const existenteAbierto = store.casos.find(
+        (c) =>
+          c.estado_apertura === 'ABIERTO' &&
+          ((chipReal && c.inmueble?.chip?.toUpperCase() === chipReal) ||
+            (matriculaReal && c.inmueble?.matricula_inmobiliaria?.toUpperCase() === matriculaReal))
+      );
+
+      if (existenteAbierto) {
+        store.caso_activo_id = existenteAbierto.id;
+        caso = existenteAbierto;
+        caso.mensajes_chat.push({
+          id: 'm-ag-' + Date.now(),
+          emisor: 'ASISTENTE',
+          autor: 'Asistente Notarial',
+          hora: ahoraHora,
+          texto: `⚠️ Ya existe un trámite ABIERTO para este predio (${llavePredio}): ${existenteAbierto.codigo_tramite}. Mientras esté ABIERTO no se puede volver a crear otro trámite igual. Te he llevado directamente a su expediente.`,
+          hallazgos: [
+            `Código del Trámite Abierto: ${existenteAbierto.codigo_tramite}`,
+            `Estado: ${existenteAbierto.estado_apertura}`
+          ],
+          alertas_rojas: ['Bloqueo Anti-Duplicados Activo: Este predio ya tiene un trámite abierto.'],
+          preguntas_pendientes: [],
+          tarjetas_tramites: [resumirTarjetaCaso(existenteAbierto)],
+          acciones_sugeridas: [{ tipo: 'VER_FICHA_TRAMITE', etiqueta: `Ver Ficha de ${existenteAbierto.codigo_tramite}` }]
+        });
+        saveStore(store);
+        return sendJson(res, 200, {
+          ok: true,
+          duplicado_bloqueado: true,
+          tramite_existente: existenteAbierto,
+          caso_activo: caso,
+          casos: store.casos,
+          estado_bpmn: calcularEstadoBpmn(caso),
+          minuta_generada_actual: generarTextoMinuta(caso)
+        });
+      }
+
+      const nuevoCaso = crearCasoLimpioDesdeCertificado(
+        {
+          tramite_id: body.tramite_id,
+          tipo_corto: body.tipo_corto,
+          tipo_tramite: body.tipo_tramite,
+          chip: chipReal || matriculaReal.replace(/[^A-Z0-9]/g, ''),
+          matricula: matriculaReal,
+          cedula_catastral: body.cedula_catastral || extraido.cedula_catastral || '',
+          direccion: body.direccion || extraido.direccion || '',
+          nombre_propietario: nombrePropReal,
+          apellido: apellidoReal,
+          cedula: cedulaReal,
+          correo_electronico: body.correo_electronico || '',
+          valor_venta: body.valor_venta || 0,
+          subcategorias_activas: body.subcategorias_activas,
+          archivo_nombre: body.archivo_nombre,
+          archivo_data_url: body.archivo_data_url,
+          tipo_mime: mimeBody,
+          texto_extraido: body.texto_extraido
+        },
+        usuarioActivo,
+        store
+      );
+
+      store.casos.unshift(nuevoCaso);
+      store.caso_activo_id = nuevoCaso.id;
+      saveStore(store);
+      return sendJson(res, 200, {
+        ok: true,
+        duplicado_bloqueado: false,
+        nuevo_caso: nuevoCaso,
+        caso_activo: nuevoCaso,
+        casos: store.casos,
+        estado_bpmn: calcularEstadoBpmn(nuevoCaso),
+        minuta_generada_actual: generarTextoMinuta(nuevoCaso)
+      });
+    }
+
+    // Si el usuario está adjuntando o reemplazando un documento dentro del trámite activo (Cédula, Certificado, Paz y Salvo, Escritura Anterior)
+    const mapDocUploadAliases = {
+      'DOC-TRAD-1': 'doc-1',
+      'DOC-CED-VEND-1': 'doc-2',
+      'DOC-CED-COMP-1': 'doc-3',
+      'DOC-CED-VEND-2': 'doc-4',
+      'DOC-CED-MONICA': 'doc-4',
+      'DOC-PAZ-ADMIN': 'doc-5',
+      'DOC-ESC-ANT': 'doc-6'
+    };
+    const rawDocReemplazar = body.documento_id || body.doc_id_reemplazar || body.doc_id;
+    const resolvedDocReemplazar = mapDocUploadAliases[rawDocReemplazar] || rawDocReemplazar;
+
+    let docTarget = null;
+    if (resolvedDocReemplazar) {
+      docTarget = caso.documentos.find((d) => d.id === resolvedDocReemplazar || d.alias_id === rawDocReemplazar);
+    }
+    if (!docTarget && body.parte_id) {
+      const idxParte = caso.partes.findIndex((p) => p.id === body.parte_id);
+      if (idxParte >= 0) {
+        const parteObj = caso.partes[idxParte];
+        parteObj.cedula_cargada = true;
+        if (cedulaBody) parteObj.numero_documento = cedulaBody;
+        if (nombrePropBody) parteObj.nombres_completos = nombrePropBody.toUpperCase();
+        if (body.correo_electronico) parteObj.correo_electronico = body.correo_electronico;
+
+        docTarget = caso.documentos.find(
+          (d) =>
+            d.estado === 'FALTA_DOCUMENTO' ||
+            d.nombre.toLowerCase().includes(parteObj.nombres_completos.split(' ')[0].toLowerCase())
+        );
+      }
+    }
+    if (tipoDoc === 'CEDULA_CIUDADANIA') {
+      if (!docTarget) {
+        docTarget = caso.documentos.find((d) => d.estado === 'FALTA_DOCUMENTO');
+      }
+      const parteSinCed = caso.partes.find((p) => !p.cedula_cargada) || (resolvedDocReemplazar === 'doc-4' ? caso.partes.find((p) => p.id === 'p-2') : null);
+      if (parteSinCed) {
+        parteSinCed.cedula_cargada = true;
+        if (cedulaBody || extraido.cedula_detectada) parteSinCed.numero_documento = cedulaBody || extraido.cedula_detectada;
+        if (nombrePropBody || extraido.nombre_detectado) parteSinCed.nombres_completos = (nombrePropBody || extraido.nombre_detectado).toUpperCase();
+      } else if (!docTarget && nombrePropBody && cedulaBody) {
+        caso.partes.push({
+          id: 'p-' + Date.now(),
+          rol: body.rol_parte || 'COMPRADOR',
+          nombres_completos: nombrePropBody.toUpperCase(),
+          numero_documento: cedulaBody,
+          lugar_expedicion: body.lugar_expedicion || 'Colombia',
+          estado_civil: body.estado_civil || 'Soltero(a)',
+          genero: 'M',
+          porcentaje: Number(body.porcentaje || 100),
+          correo_electronico: body.correo_electronico || '',
+          origen_inferencia: `Cédula adjuntada en archivo "${body.archivo_nombre}".`,
+          cedula_cargada: true,
+          aprobado_verificador: false,
+          aprobado_por: '',
+          borrador_enviado: false,
+          visto_bueno_cliente: false
+        });
+      }
+    }
+    if (!docTarget && tipoDoc === 'CERTIFICADO_TRADICION') {
+      docTarget = caso.documentos.find((d) => d.codigo_tipo === 'CERTIFICADO_TRADICION');
+    }
+    if (!docTarget && tipoDoc === 'PAZ_Y_SALVO_ADMIN') {
+      docTarget = caso.documentos.find((d) => d.codigo_tipo === 'PAZ_Y_SALVO_ADMIN');
+    }
+    if (!docTarget && tipoDoc === 'ESCRITURA_ANTERIOR') {
+      docTarget = caso.documentos.find((d) => d.codigo_tipo === 'ESCRITURA_ANTERIOR');
+    }
+
+    const camposNuevos = [];
+    if (tipoDoc === 'CERTIFICADO_TRADICION') {
+      const m = body.matricula || extraido.matricula || caso.inmueble.matricula_inmobiliaria;
+      const c = body.chip || extraido.chip || caso.inmueble.chip;
+      const dir = body.direccion || extraido.direccion || caso.inmueble.direccion;
+      caso.inmueble.matricula_inmobiliaria = m;
+      caso.inmueble.chip = c;
+      caso.inmueble.direccion = dir;
+      caso.certificado_tradicion.matricula_inmobiliaria = m;
+      caso.certificado_tradicion.chip = c;
+      caso.certificado_tradicion.direccion_actual = dir.toUpperCase();
+      camposNuevos.push(
+        { clave: 'Archivo Subido', valor: body.archivo_nombre || 'Certificado_Tradicion.pdf', dudoso: false },
+        { clave: 'Matrícula Inmobiliaria', valor: m, dudoso: false },
+        { clave: 'Código CHIP', valor: c, dudoso: false },
+        { clave: 'Dirección del Predio', valor: dir, dudoso: false }
+      );
+      if (nombrePropBody || extraido.nombre_detectado) {
+        camposNuevos.push({
+          clave: 'Propietario / Titular',
+          valor: `${(nombrePropBody || extraido.nombre_detectado).toUpperCase()} · C.C. ${cedulaBody || extraido.cedula_detectada || ''}`,
+          dudoso: false
+        });
+      }
+    } else if (tipoDoc === 'CEDULA_CIUDADANIA') {
+      const nom = (nombrePropBody || extraido.nombre_detectado || 'Titular del Documento').toUpperCase();
+      const cc = cedulaBody || extraido.cedula_detectada || 'Por verificar';
+      camposNuevos.push(
+        { clave: 'Archivo Subido', valor: body.archivo_nombre || 'Cedula.pdf', dudoso: false },
+        { clave: 'Nombre Completo Leído', valor: nom, dudoso: false },
+        { clave: 'Número de Cédula', valor: cc, dudoso: false },
+        { clave: 'Rol en el Trámite', valor: body.rol_parte || 'OTORGANTE', dudoso: false }
+      );
+    } else if (tipoDoc === 'PAZ_Y_SALVO_ADMIN') {
+      const fExp = body.fecha_expedicion || hoyIso;
+      const dObj = new Date(fExp + 'T12:00:00');
+      const ultDia = new Date(dObj.getFullYear(), dObj.getMonth() + 1, 0, 12, 0, 0).toISOString().split('T')[0];
+      camposNuevos.push(
+        { clave: 'Archivo Subido', valor: body.archivo_nombre || 'Paz_y_Salvo.pdf', dudoso: false },
+        { clave: 'Fecha de Expedición', valor: fExp, dudoso: false },
+        { clave: 'Vencimiento (Último día del mes)', valor: ultDia, dudoso: false }
+      );
+    } else {
+      camposNuevos.push(
+        { clave: 'Archivo Subido', valor: body.archivo_nombre || 'Documento_Anexo.pdf', dudoso: false },
+        { clave: 'Observación / Extracto', valor: (body.texto_extraido || 'Archivo adjuntado por el usuario para revisión del abogado.').slice(0, 220), dudoso: false }
+      );
+    }
+
+    if (docTarget) {
+      docTarget.nombre = body.titulo_documento || docTarget.nombre.replace(' (FALTANTE)', '').replace(' (PENDIENTE DE SUBIR)', '');
+      docTarget.archivo = body.archivo_nombre || docTarget.archivo;
+      docTarget.archivo_data_url = body.archivo_data_url || '';
+      docTarget.tipo_mime = mimeBody;
+      docTarget.texto_extraido = body.texto_extraido || '';
+      docTarget.fecha_expedicion = body.fecha_expedicion || hoyIso;
+      docTarget.estado = 'PENDIENTE_APROBACION_ABOGADO';
+      docTarget.nivel_alerta = 'WARNING';
+      docTarget.aprobado_abogado = false;
+      docTarget.aprobado_por = '';
+      docTarget.tipo_visor_escaneo =
+        tipoDoc === 'CERTIFICADO_TRADICION'
+          ? 'CERTIFICADO_SNR'
+          : tipoDoc === 'CEDULA_CIUDADANIA'
+          ? 'CEDULA_COLOMBIA'
+          : tipoDoc === 'PAZ_Y_SALVO_ADMIN'
+          ? 'PAZ_Y_SALVO'
+          : 'MINUTA_SELLOS_LINDEROS';
+      docTarget.mensaje_alerta = `Archivo real "${body.archivo_nombre || docTarget.archivo}" cargado por ${usuarioActivo.nombre}. Pendiente que el Abogado Verificador lo revise en el visor y lo apruebe.`;
+      docTarget.campos_leidos_agente = camposNuevos;
+    } else {
+      const nuevoDoc = {
+        id: 'doc-' + Date.now(),
+        codigo_tipo: tipoDoc,
+        nombre: body.titulo_documento || `${tipoDoc} · ${body.archivo_nombre || 'Adjunto'}`,
+        archivo: body.archivo_nombre || 'documento_adjunto.pdf',
+        archivo_data_url: body.archivo_data_url || '',
+        tipo_mime: mimeBody,
+        texto_extraido: body.texto_extraido || '',
+        fecha_expedicion: body.fecha_expedicion || hoyIso,
+        fecha_vencimiento: 'SEGÚN REGLA',
+        estado: 'PENDIENTE_APROBACION_ABOGADO',
+        nivel_alerta: 'WARNING',
+        aprobado_abogado: false,
+        aprobado_por: '',
+        mensaje_alerta: `Archivo real "${body.archivo_nombre}" cargado por ${usuarioActivo.nombre}. Pendiente de aprobación del Abogado Verificador.`,
+        tipo_visor_escaneo:
+          tipoDoc === 'CERTIFICADO_TRADICION'
+            ? 'CERTIFICADO_SNR'
+            : tipoDoc === 'CEDULA_CIUDADANIA'
+            ? 'CEDULA_COLOMBIA'
+            : tipoDoc === 'PAZ_Y_SALVO_ADMIN'
+            ? 'PAZ_Y_SALVO'
+            : 'MINUTA_SELLOS_LINDEROS',
+        campos_leidos_agente: camposNuevos
+      };
+      caso.documentos.push(nuevoDoc);
+      docTarget = nuevoDoc;
+    }
+
+    // Al subir o cambiar un documento, invalidar aprobaciones jurídicas y de clientes previas por seguridad BPMN
+    caso.aprobaciones.visto_bueno_juridico_abogado = false;
+    caso.aprobaciones.enviado_a_clientes = false;
+    caso.aprobaciones.visto_bueno_vendedores = false;
+    caso.aprobaciones.visto_bueno_compradores = false;
+
+    const estadoBpmn = calcularEstadoBpmn(caso);
+    caso.mensajes_chat.push({
+      id: 'm-up-' + Date.now(),
+      emisor: 'ASISTENTE',
+      autor: 'Asistente Notarial',
+      hora: ahoraHora,
+      texto: `📎 He recibido y procesado tu archivo real "${body.archivo_nombre}" en el trámite ${caso.codigo_tramite}. Ya está disponible en el visor de la Ficha del Trámite para revisión y aprobación del Abogado Verificador.`,
+      hallazgos: camposNuevos.map((c) => `${c.clave}: ${c.valor}`),
+      alertas_rojas: [],
+      preguntas_pendientes: [],
+      tarjetas_tramites: [resumirTarjetaCaso(caso)],
+      acciones_sugeridas: [
+        { tipo: 'VER_FICHA_TRAMITE', etiqueta: 'Ver Archivo Subido en la Ficha del Trámite' },
+        estadoBpmn.siguiente_accion
+      ]
+    });
+
+    caso.bitacora.push({
+      id: 'ev-up-' + Date.now(),
+      fecha: new Date().toLocaleString('es-CO'),
+      actor: `${usuarioActivo.nombre} (${usuarioActivo.cargo})`,
+      etapa: 'Carga de Archivo Real',
+      detalle: `Subió el archivo "${body.archivo_nombre}" (${tipoDoc}) al trámite ${caso.codigo_tramite}.`
+    });
+
+    saveStore(store);
+    return sendJson(res, 200, {
+      ok: true,
+      documento_subido: docTarget,
+      caso_activo: caso,
+      casos: store.casos,
+      estado_bpmn: estadoBpmn,
+      minuta_generada_actual: generarTextoMinuta(caso)
+    });
+  }
+
+  // ENDPOINT DE CHAT INTELIGENTE: Busca trámites por cédula/CHIP/nombre, valida duplicados abiertos, crea trámites con Certificado de Tradición, captura correos y vincula Constructoras
   if (req.method === 'POST' && pathname === '/api/chat') {
     const body = await parseJsonBody(req);
     const store = loadStore();
@@ -1420,6 +2067,82 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    // 0. DETECTAR SI EL USUARIO ESCRIBIÓ CORREOS ELECTRÓNICOS EN EL CHAT O PIDIÓ ENVIAR EL BORRADOR A CLIENTES
+    const emailsEnMensaje = msgRaw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
+    if (emailsEnMensaje.length > 0 || body.enviar_borrador_clientes) {
+      emailsEnMensaje.forEach((em, idx) => {
+        const parteDestino = caso.partes[idx] || caso.partes.find((p) => !p.correo_electronico) || caso.partes[0];
+        if (parteDestino) {
+          parteDestino.correo_electronico = em.toLowerCase();
+        }
+      });
+
+      if (body.correos_partes && Array.isArray(body.correos_partes)) {
+        body.correos_partes.forEach((item) => {
+          const p = caso.partes.find((x) => x.id === item.id || x.id === item.parte_id);
+          if (p && item.correo_electronico) p.correo_electronico = item.correo_electronico.trim();
+        });
+      }
+
+      if (!caso.aprobaciones.visto_bueno_juridico_abogado) {
+        const estadoBpmn = calcularEstadoBpmn(caso);
+        caso.mensajes_chat.push({
+          id: 'm-ag-' + Date.now(),
+          emisor: 'ASISTENTE',
+          autor: 'Asistente Notarial',
+          hora: ahoraHora,
+          texto: `He guardado el(los) correo(s) electrónico(s) en las partes del trámite (${caso.partes.map((p) => `${p.nombres_completos}: ${p.correo_electronico || 'Pendiente'}`).join(' · ')}). Recuerda que por regla BPMN primero el Abogado Verificador debe aprobar todos los documentos y dar el Visto Bueno Jurídico antes de enviar el borrador a los clientes.`,
+          hallazgos: caso.partes.map((p) => `${p.rol} ${p.nombres_completos}: ${p.correo_electronico || 'Sin correo'}`),
+          alertas_rojas: ['Pendiente Visto Bueno Jurídico del Abogado Verificador antes de poder enviar el borrador a los clientes.'],
+          preguntas_pendientes: [],
+          acciones_sugeridas: [estadoBpmn.siguiente_accion]
+        });
+        saveStore(store);
+        return sendJson(res, 200, {
+          ok: true,
+          caso_activo: caso,
+          estado_bpmn: estadoBpmn,
+          minuta_generada_actual: generarTextoMinuta(caso)
+        });
+      }
+
+      // Si ya tiene Visto Bueno del Abogado, verificar que todas las partes tengan correo y enviar
+      const sinCorreo = caso.partes.filter((p) => !p.correo_electronico || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.correo_electronico));
+      if (sinCorreo.length === 0) {
+        caso.aprobaciones.enviado_a_clientes = true;
+        caso.aprobaciones.fecha_envio_clientes = new Date().toLocaleString('es-CO');
+        caso.aprobaciones.correos_notificados = caso.partes.map((p) => `${p.nombres_completos} <${p.correo_electronico}>`);
+        caso.partes.forEach((p) => (p.borrador_enviado = true));
+        caso.etapa_actual = 'BORRADOR_ENVIADO_A_CLIENTES';
+        caso.bitacora.push({
+          id: 'ev-env-' + Date.now(),
+          fecha: new Date().toLocaleString('es-CO'),
+          actor: `${usuarioActivo.nombre} (${usuarioActivo.cargo})`,
+          etapa: 'Envío de Borrador a Clientes por Correo',
+          detalle: `Borrador enviado a: ${caso.aprobaciones.correos_notificados.join(', ')}.`
+        });
+        const estadoBpmn = calcularEstadoBpmn(caso);
+        caso.mensajes_chat.push({
+          id: 'm-ag-' + Date.now(),
+          emisor: 'ASISTENTE',
+          autor: 'Asistente Notarial',
+          hora: ahoraHora,
+          texto: `✉️ He enviado formalmente el borrador de la escritura aprobada por el abogado a los correos de todos los otorgantes. Ahora sí queda habilitada la compuerta para registrar el Visto Bueno de los Clientes.`,
+          hallazgos: caso.aprobaciones.correos_notificados.map((c) => `Enviado a: ${c}`),
+          alertas_rojas: [],
+          preguntas_pendientes: [],
+          acciones_sugeridas: [estadoBpmn.siguiente_accion]
+        });
+        saveStore(store);
+        return sendJson(res, 200, {
+          ok: true,
+          caso_activo: caso,
+          estado_bpmn: estadoBpmn,
+          minuta_generada_actual: generarTextoMinuta(caso)
+        });
+      }
+    }
+
     // 1. INTENTAR CREAR / ABRIR UN TRÁMITE NUEVO DESDE EL CHAT CON REGLA ANTI-DUPLICADOS
     if (
       body.crear_tramite_desde_chat ||
@@ -1431,21 +2154,52 @@ const server = http.createServer(async (req, res) => {
       msgLower.includes('crear tramite') ||
       msgLower.includes('crear trámite')
     ) {
-      const chipInput = (body.chip || (msgRaw.match(/AAA[0-9A-Z]+/i) || [])[0] || 'AAA0142BCDE').toUpperCase();
-      const cedulaInput = (body.cedula || (msgRaw.match(/\d{2}\.?\d{3}\.?\d{3}/) || [])[0] || '79.451.200').trim();
-      const apellidoInput = (body.apellido || (msgLower.includes('ramirez') || msgLower.includes('ramírez') ? 'RAMIREZ' : msgLower.includes('lopez') || msgLower.includes('lópe') ? 'LOPEZ' : 'TELLEZ')).toUpperCase();
-      const tipoRaw = (body.tipo_corto || body.tipo_tramite || msgLower).toUpperCase();
-      const tipoCorto = tipoRaw.includes('HIPOTECA') ? 'HIPOTECA' : tipoRaw.includes('CANCELACION') ? 'CANCELACION' : 'COMPRAVENTA';
+      const chipMatch = msgRaw.match(/AAA[0-9A-Z]+/i);
+      const matMatch = msgRaw.match(/50[A-Z]-[0-9]{5,9}(?:-[0-9]{1,4})?/i);
+      const cedulaMatch = msgRaw.match(/\d{1,3}(?:\.\d{3}){2}|\b\d{7,10}\b/);
 
-      // Verificar si ya existe un trámite ABIERTO con ese mismo CHIP o con esa misma Cédula y Tipo
+      const chipInput = String(body.chip || (chipMatch ? chipMatch[0] : '')).toUpperCase().trim();
+      const matriculaInput = String(body.matricula || (matMatch ? matMatch[0] : '')).toUpperCase().trim();
+      const cedulaInput = String(body.cedula || (cedulaMatch ? cedulaMatch[0] : '')).trim();
+      const apellidoInput = String(body.apellido || '').toUpperCase().trim();
+      const nombrePropInput = String(body.nombre_propietario || apellidoInput || '').toUpperCase().trim();
+      const tipoRaw = String(body.tipo_corto || body.tipo_tramite || msgLower).toUpperCase();
+      const tipoCorto = tipoRaw.includes('HIPOTECA') ? 'HIPOTECA' : tipoRaw.includes('CANCELACION') ? 'CANCELACION' : tipoRaw.includes('SUCESION') ? 'SUCESION' : 'COMPRAVENTA';
+
+      // Si el usuario escribió en el chat "quiero abrir un nuevo trámite" pero no adjuntó el Certificado ni indicó el CHIP/Matrícula, pedirle que adjunte su archivo real
+      if (!chipInput && !matriculaInput) {
+        caso.mensajes_chat.push({
+          id: 'm-ag-' + Date.now(),
+          emisor: 'ASISTENTE',
+          autor: 'Asistente Notarial',
+          hora: ahoraHora,
+          texto: 'Para abrir un trámite nuevo necesitamos el Certificado de Libertad y Tradición del inmueble. Haz clic en el botón de abajo para adjuntar el archivo PDF o imagen desde tu computador:',
+          hallazgos: [],
+          alertas_rojas: [],
+          preguntas_pendientes: ['Adjunta el Certificado de Libertad y Tradición para extraer el CHIP, la Matrícula y los propietarios y generar el código del trámite.'],
+          acciones_sugeridas: [
+            { tipo: 'ABRIR_MODAL_NUEVO_TRAMITE_ARCHIVO', etiqueta: '📎 Adjuntar Certificado de Libertad y Tradición (Desde tu Computador)' }
+          ]
+        });
+        saveStore(store);
+        return sendJson(res, 200, {
+          ok: true,
+          requiere_archivo: true,
+          caso_activo: caso,
+          estado_bpmn: calcularEstadoBpmn(caso),
+          minuta_generada_actual: generarTextoMinuta(caso)
+        });
+      }
+
+      // Verificar si ya existe un trámite ABIERTO con ese mismo CHIP o Matrícula
       const existenteAbierto = store.casos.find(
         (c) =>
           c.estado_apertura === 'ABIERTO' &&
-          (c.inmueble?.chip?.toUpperCase() === chipInput ||
-            (body.forzar_duplicado_check && c.partes.some((p) => p.numero_documento.replace(/\./g, '') === cedulaInput.replace(/\./g, ''))))
+          ((chipInput && c.inmueble?.chip?.toUpperCase() === chipInput) ||
+            (matriculaInput && c.inmueble?.matricula_inmobiliaria?.toUpperCase() === matriculaInput))
       );
 
-      if (existenteAbierto && !body.forzar_nuevo_distinto) {
+      if (existenteAbierto) {
         store.caso_activo_id = existenteAbierto.id;
         caso = existenteAbierto;
         caso.mensajes_chat.push({
@@ -1453,22 +2207,20 @@ const server = http.createServer(async (req, res) => {
           emisor: 'ASISTENTE',
           autor: 'Asistente Notarial',
           hora: ahoraHora,
-          texto: `⚠️ Ya existe un trámite ABIERTO para este Certificado de Libertad y Tradición (CHIP ${existenteAbierto.inmueble.chip} / Cédula ${cedulaInput}). Mientras esté ABIERTO no se puede duplicar. Te he llevado directamente al trámite abierto: ${existenteAbierto.codigo_tramite}.`,
+          texto: `⚠️ Ya existe un trámite ABIERTO para este Certificado de Libertad y Tradición (CHIP ${existenteAbierto.inmueble.chip}). Mientras esté ABIERTO no se puede volver a crear. Te he llevado directamente al trámite abierto: ${existenteAbierto.codigo_tramite}.`,
           hallazgos: [
             `Código del Trámite Abierto: ${existenteAbierto.codigo_tramite}`,
             `Título: ${existenteAbierto.titulo_tramite}`,
-            `Estado actual: ${existenteAbierto.estado_apertura} (${existenteAbierto.etapa_actual})`
+            `Estado actual: ${existenteAbierto.estado_apertura}`
           ],
           alertas_rojas: [
             'Bloqueo Anti-Duplicados Activo: No se permite crear otro trámite igual mientras este expediente continúe ABIERTO.'
           ],
-          preguntas_pendientes: [
-            '¿Deseas ver la ficha completa de este trámite o prefieres abrir un trámite con un Certificado de Tradición y CHIP diferente?'
-          ],
+          preguntas_pendientes: [],
           tarjetas_tramites: [resumirTarjetaCaso(existenteAbierto)],
           acciones_sugeridas: [
             { tipo: 'VER_FICHA_TRAMITE', etiqueta: `Ver Ficha de ${existenteAbierto.codigo_tramite}` },
-            { tipo: 'CREAR_TRAMITE_NUEVO_CHIP', etiqueta: 'Abrir Trámite Nuevo con otro Certificado de Tradición (Ej: CHIP AAA0299BCDE · Ramírez)' }
+            { tipo: 'ABRIR_MODAL_NUEVO_TRAMITE_ARCHIVO', etiqueta: '📎 Subir otro Certificado de Tradición diferente' }
           ]
         });
         saveStore(store);
@@ -1482,56 +2234,23 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-      // Si el CHIP no tiene trámite abierto, crear el nuevo trámite codificado
-      const nuevoChip = body.forzar_nuevo_distinto ? body.chip || 'AAA0299BCDE' : chipInput;
-      const nuevoApellido = body.forzar_nuevo_distinto ? body.apellido || 'RAMIREZ' : apellidoInput;
-      const nuevoNombreProp = body.nombre_propietario || 'CAMILO ANDRÉS RAMÍREZ SOTO';
-      const nuevaCedula = body.forzar_nuevo_distinto ? body.cedula || '80.554.321' : cedulaInput;
-      const nuevaMatricula = body.matricula || '50N-9944112';
-      const nuevoCodigo = `${tipoCorto}-${nuevoChip}-${nuevoApellido}`;
-      const nuevoId = 'caso-' + Date.now();
-
-      const nuevoCaso = JSON.parse(JSON.stringify(store.casos[0]));
-      nuevoCaso.id = nuevoId;
-      nuevoCaso.codigo_tramite = nuevoCodigo;
-      nuevoCaso.titulo_tramite = `${tipoCorto === 'HIPOTECA' ? 'Hipoteca' : 'Compraventa'} · ${nuevoNombreProp} · CHIP ${nuevoChip}`;
-      nuevoCaso.estado_apertura = 'ABIERTO';
-      nuevoCaso.estado_tramite = 'ABIERTO';
-      nuevoCaso.radicado = 'NOT-2026-000' + Math.floor(200 + Math.random() * 700);
-      nuevoCaso.creado_por = `${usuarioActivo.nombre} (${usuarioActivo.cargo})`;
-      nuevoCaso.inmueble.chip = nuevoChip;
-      nuevoCaso.inmueble.matricula_inmobiliaria = nuevaMatricula;
-      nuevoCaso.inmueble.direccion = body.direccion || 'Carrera 11 # 93-46 Apto 802, Bogotá D.C.';
-      nuevoCaso.certificado_tradicion.chip = nuevoChip;
-      nuevoCaso.certificado_tradicion.matricula_inmobiliaria = nuevaMatricula;
-      nuevoCaso.certificado_tradicion.direccion_actual = nuevoCaso.inmueble.direccion.toUpperCase();
-      nuevoCaso.partes[0].nombres_completos = nuevoNombreProp;
-      nuevoCaso.partes[0].numero_documento = nuevaCedula;
-      nuevoCaso.mensajes_chat = [
+      const nuevoCaso = crearCasoLimpioDesdeCertificado(
         {
-          id: 'm-new-1',
-          emisor: 'ASISTENTE',
-          autor: 'Asistente Notarial',
-          hora: ahoraHora,
-          texto: `He creado y abierto el nuevo trámite a partir del Certificado de Libertad y Tradición (${nuevaMatricula}). Código asignado: ${nuevoCodigo}.`,
-          hallazgos: [
-            `Código único generado: ${nuevoCodigo} (Estado: ABIERTO)`,
-            `Primer propietario en Certificado de Tradición (Vendedor): ${nuevoNombreProp} (C.C. ${nuevaCedula}).`,
-            `Creado por: ${usuarioActivo.nombre}.`
-          ],
-          alertas_rojas: [
-            'Recuerda adjuntar las cédulas de todos los intervinientes y el Paz y Salvo de Administración si aplica.'
-          ],
-          preguntas_pendientes: [
-            '¿Este trámite pertenece a algún proyecto de Constructora? (Indica Sí para guardar Torre y Apartamento).'
-          ],
-          tarjetas_tramites: [resumirTarjetaCaso(nuevoCaso)],
-          acciones_sugeridas: [
-            { tipo: 'VER_FICHA_TRAMITE', etiqueta: `Ver Ficha Completa de ${nuevoCodigo}` },
-            { tipo: 'VINCULAR_CONSTRUCTORA_CHAT', etiqueta: 'Sí, pertenece a un Proyecto de Constructora' }
-          ]
-        }
-      ];
+          tipo_corto: tipoCorto,
+          tipo_tramite: body.tipo_tramite,
+          chip: chipInput || matriculaInput,
+          matricula: matriculaInput,
+          direccion: body.direccion || '',
+          nombre_propietario: nombrePropInput || apellidoInput || 'PROPIETARIO INSCRITO',
+          apellido: apellidoInput || (nombrePropInput ? nombrePropInput.split(/\s+/)[0] : 'TITULAR'),
+          cedula: cedulaInput || 'POR_CONFIRMAR',
+          archivo_nombre: body.archivo_nombre || `certificado_${chipInput || matriculaInput}.pdf`,
+          archivo_data_url: body.archivo_data_url || '',
+          texto_extraido: body.texto_extraido || ''
+        },
+        usuarioActivo,
+        store
+      );
 
       store.casos.unshift(nuevoCaso);
       store.caso_activo_id = nuevoCaso.id;
@@ -1547,7 +2266,7 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // 2. BÚSQUEDA DE TRÁMITES DESDE EL CHAT (Por nombre, cédula, CHIP, estado abierto/cerrado o tipo de trámite)
+    // 2. BÚSQUEDA REAL DE TRÁMITES DESDE EL CHAT (Por nombre, cédula, CHIP, estado abierto/cerrado o tipo de trámite)
     const esBusqueda =
       body.buscar_tramites ||
       msgLower.includes('dime el tramite') ||
@@ -1565,7 +2284,7 @@ const server = http.createServer(async (req, res) => {
       msgLower.includes('79451200') ||
       msgLower.includes('19.440.112') ||
       msgLower.includes('51.882.300') ||
-      msgLower.includes('aaa0') ||
+      msgLower.includes('aaa') ||
       msgLower.includes('abierto') ||
       msgLower.includes('cerrado') ||
       msgLower.includes('viejos') ||
@@ -1574,7 +2293,16 @@ const server = http.createServer(async (req, res) => {
 
     if (esBusqueda && !body.subir_cedula_monica && !body.vincular_constructora) {
       const q = (body.filtro_busqueda || msgLower).trim();
+      const stopWords = new Set(['oye', 'dime', 'el', 'la', 'los', 'las', 'de', 'del', 'tramite', 'trámite', 'tramites', 'trámites', 'buscar', 'busca', 'muestrame', 'muéstrame', 'ver', 'por', 'favor', 'cedula', 'cédula', 'chip', 'con', 'y', 'o']);
+      const tokens = q
+        .replace(/[,:;?¿!¡]/g, ' ')
+        .split(/\s+/)
+        .filter((t) => t.length >= 2 && !stopWords.has(t));
+
       let resultados = store.casos.filter((c) => {
+        if (q === 'todos' || q.includes('todos los') || q.includes('abiertos y cerrados') || q.includes('viejos')) {
+          return true;
+        }
         const blob = [
           c.codigo_tramite,
           c.titulo_tramite,
@@ -1582,39 +2310,28 @@ const server = http.createServer(async (req, res) => {
           c.tramite_nombre,
           c.inmueble?.chip,
           c.inmueble?.matricula_inmobiliaria,
-          ...c.partes.map((p) => `${p.nombres_completos} ${p.numero_documento} ${p.numero_documento.replace(/\./g, '')}`)
+          ...(c.partes || []).map((p) => `${p.nombres_completos} ${p.numero_documento} ${p.numero_documento.replace(/\./g, '')}`)
         ]
           .join(' ')
           .toLowerCase();
 
-        if (q.includes('mauricio') || q.includes('tellez') || q.includes('téllez') || q.includes('79.451.200') || q.includes('79451200')) {
-          return (
-            blob.includes('téllez') ||
-            blob.includes('tellez') ||
-            blob.includes('79.451.200') ||
-            c.codigo_tramite === 'COMPRAVENTA-AAA0098XYZW-GOMEZ'
-          );
+        // Coincidencia real por tokens del usuario; si consulta por Mauricio Téllez (79.451.200), incluye además el histórico cerrado para comparar abiertos vs cerrados
+        const matchTokens = tokens.some((tk) => blob.includes(tk) || blob.includes(tk.replace(/\./g, '')));
+        if ((q.includes('mauricio') || q.includes('tellez') || q.includes('téllez') || q.includes('79.451.200')) && c.estado_apertura === 'CERRADO') {
+          return true;
         }
-        if (q.includes('gomez') || q.includes('gómez') || q.includes('19.440.112') || q.includes('cerrado')) {
-          return blob.includes('gómez') || blob.includes('gomez') || c.estado_apertura === 'CERRADO';
-        }
-        if (q.includes('rodriguez') || q.includes('rodríguez') || q.includes('hipoteca') || q.includes('51.882.300')) {
-          return blob.includes('rodríguez') || blob.includes('hipoteca');
-        }
-        if (q.includes('compraventa')) {
-          return blob.includes('compraventa');
-        }
-        return true;
+        return matchTokens;
       });
-
-      if (resultados.length === 0) resultados = store.casos;
 
       caso.mensajes_chat.push({
         id: 'm-ag-' + Date.now(),
         emisor: 'ASISTENTE',
         autor: 'Asistente Notarial',
         hora: ahoraHora,
-        texto: `He buscado en el archivo de la notaría y encontré ${resultados.length} trámite(s). Haz clic en cualquiera de las tarjetas de abajo para abrir su conversación o ver su Ficha Completa (allí ves si está ABIERTO o CERRADO, su código CHIP y sus documentos escaneados):`,
+        texto:
+          resultados.length > 0
+            ? `He buscado en el archivo de la notaría y encontré ${resultados.length} trámite(s). Haz clic en cualquiera de las tarjetas para abrir su conversación o ver su Ficha Completa:`
+            : `No encontré ningún trámite que coincida con "${msgRaw}". Puedes adjuntar un Certificado de Libertad y Tradición para abrirlo:`,
         hallazgos: resultados.map(
           (r) =>
             `[${r.estado_apertura}] ${r.codigo_tramite} · ${r.tramite_nombre} · Titular: ${r.partes[0]?.nombres_completos} (C.C. ${r.partes[0]?.numero_documento}) · CHIP: ${r.inmueble.chip}`
@@ -1623,7 +2340,8 @@ const server = http.createServer(async (req, res) => {
         preguntas_pendientes: [],
         tarjetas_tramites: resultados.map(resumirTarjetaCaso),
         acciones_sugeridas: [
-          { tipo: 'VER_FICHA_TRAMITE', etiqueta: `Ver Ficha del Trámite Actual (${caso.codigo_tramite})` }
+          { tipo: 'VER_FICHA_TRAMITE', etiqueta: `Ver Ficha del Trámite Actual (${caso.codigo_tramite})` },
+          { tipo: 'ABRIR_MODAL_NUEVO_TRAMITE_ARCHIVO', etiqueta: '📎 Abrir Trámite Nuevo con Certificado de Tradición' }
         ]
       });
 
@@ -1637,16 +2355,18 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // 3. VINCULACIÓN CON PROYECTO DE CONSTRUCTORA DESDE EL CHAT (Pregunta del Agente: ¿Es de constructora? -> Pide Torre y Apto y actualiza estados)
+    // 3. VINCULACIÓN CON PROYECTO DE CONSTRUCTORA DESDE EL CHAT (100% dinámico según proyecto, torre y apartamento reales)
     if (
       body.vincular_constructora ||
       msgLower.includes('constructora') ||
       msgLower.includes('torre') ||
       (msgLower.includes('si') && msgLower.includes('apto'))
     ) {
-      const proy = store.proyectos_constructoras[0];
-      const torreElegida = body.torre_bloque || body.torre || 'Torre A';
-      const aptoRaw = body.apartamento || '401';
+      const proy =
+        store.proyectos_constructoras.find((p) => p.proyecto_id === body.proyecto_id) ||
+        store.proyectos_constructoras[0];
+      const torreElegida = body.torre_bloque || body.torre || proy.bloques_configurados[0] || 'Torre A';
+      const aptoRaw = String(body.apartamento || '401');
       const aptoNumero = aptoRaw.replace(/^Apartamento\s+/i, '').trim();
       const unidadId = `${torreElegida.replace('Torre ', '').trim()}-${aptoNumero}`;
 
@@ -1655,25 +2375,28 @@ const server = http.createServer(async (req, res) => {
         caso.subcategorias_activas.push('SUB-PROYECTO-CONSTRUCTORA');
       }
       caso.constructora_info = {
-        proyecto_id: body.proyecto_id || proy.proyecto_id,
+        proyecto_id: proy.proyecto_id,
         nombre_proyecto: proy.nombre_proyecto,
         torre_bloque: torreElegida,
         apartamento: aptoRaw
       };
       caso.constructora_vinculada = {
         es_constructora: true,
-        proyecto_id: body.proyecto_id || proy.proyecto_id,
+        proyecto_id: proy.proyecto_id,
         nombre_proyecto: proy.nombre_proyecto,
         torre: torreElegida,
         torre_bloque: torreElegida,
         apartamento: aptoRaw
       };
 
-      const unidad = proy.unidades.find((u) => u.unidad_id === unidadId) || proy.unidades[3];
+      const compradorParte = caso.partes.find((p) => p.rol === 'COMPRADOR') || caso.partes[0];
+      const unidad = proy.unidades.find((u) => u.unidad_id === unidadId || (u.bloque === torreElegida && u.apartamento === aptoNumero));
       if (unidad) {
         unidad.estado_dinamico = 'En revisión';
-        unidad.comprador_nombre = caso.partes[0]?.nombres_completos || 'Mauricio Arturo Téllez Restrepo';
-        unidad.comprador_cc = caso.partes[0]?.numero_documento || '79.451.200';
+        if (compradorParte) {
+          unidad.comprador_nombre = compradorParte.nombres_completos;
+          unidad.comprador_cc = compradorParte.numero_documento;
+        }
       }
 
       caso.bitacora.push({
@@ -1689,7 +2412,7 @@ const server = http.createServer(async (req, res) => {
         emisor: 'ASISTENTE',
         autor: 'Asistente Notarial',
         hora: ahoraHora,
-        texto: `He vinculado este trámite (${caso.codigo_tramite}) al proyecto de constructora "${proy.nombre_proyecto}", ${torreElegida}, Apartamento ${aptoNumero}. Heredé automáticamente el Reglamento de P.H. y el Certificado de Mayor Extensión, y actualicé el estado de la unidad ${unidadId} en el tablero de la constructora.`,
+        texto: `He vinculado este trámite (${caso.codigo_tramite}) al proyecto "${proy.nombre_proyecto}", ${torreElegida}, Apartamento ${aptoNumero}. Heredé los documentos matriz y actualicé el estado de la unidad ${unidadId} en el proyecto.`,
         hallazgos: [
           `Proyecto: ${proy.nombre_proyecto} (${proy.constructora})`,
           `Ubicación guardada: ${torreElegida} · Apartamento ${aptoNumero} (Unidad ${unidadId})`,
@@ -1717,29 +2440,29 @@ const server = http.createServer(async (req, res) => {
     const alertas = [];
     const preguntas = [];
 
-    if (body.subir_cedula_monica || msgLower.includes('mónica') || msgLower.includes('monica') || msgLower.includes('cedula') || msgLower.includes('cédula')) {
-      const monica = caso.partes.find((p) => p.numero_documento === '52.110.900');
-      if (monica && !monica.cedula_cargada) {
-        monica.cedula_cargada = true;
-        monica.origen_inferencia = 'Co-propietaria VENDEDORA (50%) en Certificado de Tradición · Cédula 52.110.900 adjuntada en el chat.';
-        const docFaltante = caso.documentos.find((d) => d.codigo_tipo === 'CEDULA_VENDEDOR_2_FALTANTE');
+    if (body.subir_cedula_monica) {
+      const partePendiente = caso.partes.find((p) => !p.cedula_cargada) || caso.partes.find((p) => p.numero_documento === '52.110.900');
+      if (partePendiente) {
+        partePendiente.cedula_cargada = true;
+        partePendiente.origen_inferencia = `Cédula ${partePendiente.numero_documento} adjuntada al expediente.`;
+        const docFaltante = caso.documentos.find((d) => d.estado === 'FALTA_DOCUMENTO' || d.codigo_tipo === 'CEDULA_VENDEDOR_2_FALTANTE');
         if (docFaltante) {
           docFaltante.codigo_tipo = 'CEDULA_VENDEDOR_2';
-          docFaltante.nombre = 'Cédula de Ciudadanía Vendedora 2 · Mónica Patricia Pérez Gómez';
-          docFaltante.archivo = 'cedula_monica_perez_52110900.pdf';
+          docFaltante.nombre = `Cédula de Ciudadanía · ${partePendiente.nombres_completos}`;
+          docFaltante.archivo = body.archivo_nombre || `cedula_${partePendiente.numero_documento.replace(/\./g, '')}.pdf`;
+          docFaltante.archivo_data_url = body.archivo_data_url || '';
           docFaltante.estado = 'PENDIENTE_APROBACION_ABOGADO';
           docFaltante.nivel_alerta = 'WARNING';
           docFaltante.tipo_visor_escaneo = 'CEDULA_COLOMBIA';
-          docFaltante.mensaje_alerta = 'Cédula adjuntada desde el chat. Lista para que el Abogado Verificador revise la imagen escaneada y la apruebe.';
+          docFaltante.mensaje_alerta = 'Cédula adjuntada. Lista para que el Abogado Verificador revise el documento y lo apruebe.';
           docFaltante.campos_leidos_agente = [
-            { clave: 'Número de Cédula', valor: '52.110.900', dudoso: false },
-            { clave: 'Apellidos', valor: 'PÉREZ GÓMEZ', dudoso: false },
-            { clave: 'Nombres', valor: 'MÓNICA PATRICIA', dudoso: false },
-            { clave: 'Fecha y Lugar de Expedición', valor: '04-JUN-1999 · BOGOTÁ D.C.', dudoso: false },
-            { clave: 'Rol Asignado por Tradición', valor: 'VENDEDORA (50%)', dudoso: false }
+            { clave: 'Número de Cédula', valor: partePendiente.numero_documento, dudoso: false },
+            { clave: 'Nombre Completo', valor: partePendiente.nombres_completos, dudoso: false },
+            { clave: 'Lugar de Expedición', valor: partePendiente.lugar_expedicion || 'Bogotá D.C.', dudoso: false },
+            { clave: 'Rol en el Trámite', valor: `${partePendiente.rol} (${Number(partePendiente.porcentaje || 0)}%)`, dudoso: false }
           ];
         }
-        hallazgos.push('Cédula de Mónica Patricia Pérez Gómez (C.C. 52.110.900) recibida desde el chat y extraída. Ahora el Abogado Verificador puede ver la imagen escaneada en la Ficha del Trámite y aprobarla.');
+        hallazgos.push(`Cédula de ${partePendiente.nombres_completos} (C.C. ${partePendiente.numero_documento}) adjuntada al expediente.`);
       }
     }
 
@@ -1776,7 +2499,7 @@ const server = http.createServer(async (req, res) => {
       preguntas.push(`Hay ${dudas.length} puntos con sello en la minuta anterior escaneada que requieren aprobación en la Ficha del Trámite.`);
     }
     if (!caso.pertenece_constructora) {
-      preguntas.push('¿Este trámite pertenece a algún proyecto de Constructora? (Si dices Sí, guardo Torre y Apartamento).');
+      preguntas.push('¿Este trámite pertenece a algún proyecto de Constructora? (Puedes vincularlo en la Ficha seleccionando Proyecto, Torre y Apartamento).');
     }
 
     const estadoBpmn = calcularEstadoBpmn(caso);
@@ -1785,13 +2508,14 @@ const server = http.createServer(async (req, res) => {
       emisor: 'ASISTENTE',
       autor: 'Asistente Notarial',
       hora: ahoraHora,
-      texto: `Mensaje registrado en el expediente ${caso.codigo_tramite} (${caso.estado_apertura}). Aquí tienes el resumen y las acciones directas:`,
+      texto: `Mensaje registrado en el expediente ${caso.codigo_tramite} (${caso.estado_apertura}). Aquí tienes el resumen y las acciones disponibles:`,
       hallazgos: hallazgos.length ? hallazgos : [`Trámite activo: ${caso.codigo_tramite} · ${caso.titulo_tramite}`],
       alertas_rojas: alertas,
       preguntas_pendientes: preguntas,
       tarjetas_tramites: [resumirTarjetaCaso(caso)],
       acciones_sugeridas: [
-        { tipo: 'VER_FICHA_TRAMITE', etiqueta: 'Ver Trámite (Ocultar Chat y Ver Documentos Escaneados)' },
+        { tipo: 'VER_FICHA_TRAMITE', etiqueta: 'Ver Trámite (Documentos, Predio y Cadena de Aprobación)' },
+        { tipo: 'ABRIR_MODAL_SUBIR_ARCHIVO', etiqueta: '📎 Adjuntar Documento desde tu Computador' },
         estadoBpmn.siguiente_accion
       ]
     });
@@ -1817,6 +2541,7 @@ const server = http.createServer(async (req, res) => {
       'DOC-CED-VEND-1': 'doc-2',
       'DOC-CED-COMP-1': 'doc-3',
       'DOC-CED-VEND-2': 'doc-4',
+      'DOC-CED-MONICA': 'doc-4',
       'DOC-PAZ-ADMIN': 'doc-5',
       'DOC-ESC-ANT': 'doc-6'
     };
@@ -1845,17 +2570,22 @@ const server = http.createServer(async (req, res) => {
         doc.nivel_alerta = 'OK';
         doc.mensaje_alerta = `Revisado frente al documento escaneado y aprobado por ${usuarioActivo.nombre}.`;
 
-        // Sincronizar aprobación de la parte (Vendedor/Comprador) asociada a esta cédula
         if (doc.id === 'doc-2' || rawDocId === 'DOC-CED-VEND-1') {
           const p1 = (caso.partes || []).find((p) => p.id === 'p-1' || p.id === 'PARTE-1');
           if (p1) p1.aprobado_verificador = true;
-        } else if (doc.id === 'doc-4' || rawDocId === 'DOC-CED-VEND-2') {
+        } else if (doc.id === 'doc-4' || rawDocId === 'DOC-CED-VEND-2' || rawDocId === 'DOC-CED-MONICA') {
           const p2 = (caso.partes || []).find((p) => p.id === 'p-2' || p.id === 'PARTE-2');
           if (p2) p2.aprobado_verificador = true;
         } else if (doc.id === 'doc-3' || rawDocId === 'DOC-CED-COMP-1') {
           const p3 = (caso.partes || []).find((p) => p.id === 'p-3' || p.id === 'PARTE-3');
           if (p3) p3.aprobado_verificador = true;
         }
+      } else {
+        // Si solo editó campos sin aprobar, invalida visto bueno posterior para exigir nueva revisión
+        caso.aprobaciones.visto_bueno_juridico_abogado = false;
+        caso.aprobaciones.enviado_a_clientes = false;
+        caso.aprobaciones.visto_bueno_vendedores = false;
+        caso.aprobaciones.visto_bueno_compradores = false;
       }
       caso.bitacora.push({
         id: 'ev-doc-' + Date.now(),
@@ -1866,7 +2596,6 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // Si se aprobó el documento de Escritura Anterior, también marcar sus linderos como aprobados
     if (doc && doc.codigo_tipo === 'ESCRITURA_ANTERIOR' && debeAprobar) {
       caso.discrepancias_linderos.forEach((d) => {
         d.estado = 'APROBADO_ABOGADO';
@@ -1885,29 +2614,88 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // ENDPOINT: CORREGIR O APROBAR DATOS DE UNA PARTE (Vendedor / Comprador)
-  if (req.method === 'POST' && pathname === '/api/parte/aprobar-o-corregir') {
+  // ENDPOINT: AGREGAR, CORREGIR O APROBAR DATOS DE UNA PARTE (Vendedor / Comprador y su Correo Electrónico)
+  if (req.method === 'POST' && (pathname === '/api/parte/aprobar-o-corregir' || pathname === '/api/parte/agregar')) {
     const body = await parseJsonBody(req);
     const store = loadStore();
     const caso = getCasoActivo(store);
     const usuarioActivo = getUsuarioActivo(store);
-    const parte = caso.partes.find((p) => p.id === body.parte_id);
-    if (parte) {
-      if (body.nombres_completos) parte.nombres_completos = body.nombres_completos;
-      if (body.numero_documento) parte.numero_documento = body.numero_documento;
-      if (body.estado_civil) parte.estado_civil = body.estado_civil;
-      if (body.aprobar) {
-        parte.aprobado_verificador = true;
-        parte.aprobado_por = usuarioActivo.nombre;
+
+    if (pathname === '/api/parte/agregar' || body.agregar_nueva) {
+      const nuevaParte = {
+        id: 'p-' + Date.now(),
+        rol: body.rol || 'COMPRADOR',
+        nombres_completos: String(body.nombres_completos || 'NUEVO OTORGANTE').toUpperCase().trim(),
+        numero_documento: String(body.numero_documento || '').trim(),
+        lugar_expedicion: body.lugar_expedicion || 'Bogotá D.C.',
+        estado_civil: body.estado_civil || 'Soltero(a)',
+        genero: body.genero || 'M',
+        porcentaje: Number(body.porcentaje || 100),
+        correo_electronico: String(body.correo_electronico || '').trim(),
+        origen_inferencia: 'Registrado directamente en la Ficha del Trámite.',
+        cedula_cargada: Boolean(body.cedula_cargada),
+        aprobado_verificador: Boolean(body.aprobar),
+        aprobado_por: body.aprobar ? usuarioActivo.nombre : '',
+        borrador_enviado: false,
+        visto_bueno_cliente: false
+      };
+      caso.partes.push(nuevaParte);
+      if (!nuevaParte.cedula_cargada) {
+        caso.documentos.push({
+          id: 'doc-ced-' + Date.now(),
+          codigo_tipo: 'CEDULA_CIUDADANIA',
+          nombre: `Cédula de Ciudadanía ${nuevaParte.rol} · ${nuevaParte.nombres_completos} (FALTANTE)`,
+          archivo: 'PENDIENTE DE ADJUNTAR ARCHIVO',
+          archivo_data_url: '',
+          fecha_vencimiento: 'SIN_VENCIMIENTO',
+          estado: 'FALTA_DOCUMENTO',
+          nivel_alerta: 'CRITICAL',
+          aprobado_abogado: false,
+          aprobado_por: '',
+          mensaje_alerta: `Falta adjuntar el archivo de la Cédula de ${nuevaParte.nombres_completos} (C.C. ${nuevaParte.numero_documento}).`,
+          tipo_visor_escaneo: 'FALTANTE',
+          campos_leidos_agente: [
+            { clave: 'Titular Requerido', valor: nuevaParte.nombres_completos, dudoso: true },
+            { clave: 'Cédula Esperada', valor: nuevaParte.numero_documento, dudoso: true }
+          ]
+        });
       }
-      caso.bitacora.push({
-        id: 'ev-parte-' + Date.now(),
-        fecha: new Date().toLocaleString('es-CO'),
-        actor: `${usuarioActivo.nombre} (${usuarioActivo.cargo})`,
-        etapa: 'Verificación de Otorgante',
-        detalle: `Verificó y aprobó datos de ${parte.rol}: ${parte.nombres_completos} (C.C. ${parte.numero_documento}).`
-      });
+      caso.aprobaciones.visto_bueno_juridico_abogado = false;
+      caso.aprobaciones.enviado_a_clientes = false;
+      caso.aprobaciones.visto_bueno_vendedores = false;
+      caso.aprobaciones.visto_bueno_compradores = false;
+    } else {
+      const parte = caso.partes.find((p) => p.id === body.parte_id);
+      if (parte) {
+        if (typeof body.nombres_completos === 'string' && body.nombres_completos.trim()) {
+          parte.nombres_completos = body.nombres_completos.toUpperCase().trim();
+        }
+        if (typeof body.numero_documento === 'string' && body.numero_documento.trim()) {
+          parte.numero_documento = body.numero_documento.trim();
+        }
+        if (typeof body.estado_civil === 'string' && body.estado_civil.trim()) {
+          parte.estado_civil = body.estado_civil.trim();
+        }
+        if (typeof body.correo_electronico === 'string') {
+          parte.correo_electronico = body.correo_electronico.trim();
+        }
+        if (typeof body.porcentaje !== 'undefined') {
+          parte.porcentaje = Number(body.porcentaje || 0);
+        }
+        if (body.aprobar) {
+          parte.aprobado_verificador = true;
+          parte.aprobado_por = usuarioActivo.nombre;
+        }
+        caso.bitacora.push({
+          id: 'ev-parte-' + Date.now(),
+          fecha: new Date().toLocaleString('es-CO'),
+          actor: `${usuarioActivo.nombre} (${usuarioActivo.cargo})`,
+          etapa: 'Actualización / Verificación de Otorgante',
+          detalle: `Actualizó datos de ${parte.rol}: ${parte.nombres_completos} (C.C. ${parte.numero_documento} · Correo: ${parte.correo_electronico || 'Pendiente'}).`
+        });
+      }
     }
+
     saveStore(store);
     return sendJson(res, 200, {
       ok: true,
@@ -1938,9 +2726,11 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    const d1 = caso.discrepancias_linderos[0]?.valor_seleccionado || 'OCHENTA Y OCHO PUNTO CINCUENTA Y TRES (88.53) METROS CUADRADOS';
-    const d2 = caso.discrepancias_linderos[1]?.valor_seleccionado || 'nueve metros treinta centímetros (9.30 mts)';
-    caso.inmueble.linderos_especiales = `APARTAMENTO SEISCIENTOS UNO (601): Tiene su acceso por el hall del sexto piso, consta de sala-comedor, tres alcobas, cocina, zona de ropas y dos baños. Tiene un área privada de ${d1}, coeficiente de copropiedad del 4.18% y se comprende dentro de los siguientes linderos especiales: POR EL NORTE: En línea quebrada de ocho metros cuarenta y cinco centímetros (8.45 mts) con vacío sobre zona común exterior. POR EL SUR: En extensión de seis metros veinte centímetros (6.20 mts) con hall de circulación común y ducto de escaleras. POR EL ORIENTE: En extensión de ${d2} con muro común que lo separa del apartamento seiscientos dos (602). POR EL OCCIDENTE: En extensión de nueve metros treinta centímetros (9.30 mts) con vacío sobre antejardín de la Calle 116. NADIR: Con placa que lo separa del quinto piso. CENIT: Con placa de cubierta del séptimo piso.`;
+    if (caso.discrepancias_linderos.length >= 2) {
+      const d1 = caso.discrepancias_linderos[0]?.valor_seleccionado || 'OCHENTA Y OCHO PUNTO CINCUENTA Y TRES (88.53) METROS CUADRADOS';
+      const d2 = caso.discrepancias_linderos[1]?.valor_seleccionado || 'nueve metros treinta centímetros (9.30 mts)';
+      caso.inmueble.linderos_especiales = `${caso.inmueble.direccion}: Área privada aprobada de ${d1}, y lindero especial verificado en extensión de ${d2}.`;
+    }
 
     const pendientes = caso.discrepancias_linderos.filter((d) => d.estado === 'PENDIENTE_HUMANO');
     if (pendientes.length === 0) {
@@ -1962,7 +2752,7 @@ const server = http.createServer(async (req, res) => {
         autor: 'Asistente Notarial',
         hora: ahoraHora,
         texto: `${usuarioActivo.nombre} aprobó los linderos tras verificar la imagen escaneada de la minuta anterior.`,
-        hallazgos: [`Área privada aprobada: ${d1}`, `Lindero Oriente aprobado: ${d2}`],
+        hallazgos: caso.discrepancias_linderos.map((d) => `${d.campo}: ${d.valor_seleccionado}`),
         alertas_rojas: [],
         preguntas_pendientes: [],
         acciones_sugeridas: [estadoBpmn.siguiente_accion]
@@ -1978,25 +2768,60 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // ENDPOINT CON COMPUERTAS ESTRICTAS BPMN 2.0 (PROHIBIDO SALTAR ETAPAS O APROBAR CLIENTE SIN VISTO BUENO DE ABOGADO Y SIN ENVÍO POR CORREO)
   if (req.method === 'POST' && pathname === '/api/flujo/avanzar') {
     const body = await parseJsonBody(req);
     const store = loadStore();
     const caso = getCasoActivo(store);
     const usuarioActivo = getUsuarioActivo(store);
     const ahoraHora = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+    const estadoPrevio = calcularEstadoBpmn(caso);
 
     if (body.paso === 'VISTO_BUENO_ABOGADO') {
+      if (!usuarioActivo.permisos?.puede_verificar_aprobar) {
+        return sendJson(res, 403, {
+          ok: false,
+          error: `El perfil actual (${usuarioActivo.cargo}) no tiene permiso de Abogado Verificador para dar Visto Bueno Jurídico.`
+        });
+      }
+      if (!estadoPrevio.docs_completos) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: 'No se puede dar Visto Bueno Jurídico del Abogado porque aún faltan documentos obligatorios por adjuntar en el expediente.'
+        });
+      }
+      if (!estadoPrevio.linderos_listos) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: `No se puede dar Visto Bueno Jurídico del Abogado porque hay ${estadoPrevio.dudas_linderos_pendientes} lindero(s) con sello húmedo pendientes de aprobar.`
+        });
+      }
+      // Si el abogado da el visto bueno general habiendo cargado todos los documentos y linderos, marcamos como aprobados los documentos restantes que ya están completos
+      caso.documentos.forEach((d) => {
+        if (d.estado !== 'FALTA_DOCUMENTO') {
+          d.aprobado_abogado = true;
+          d.aprobado_por = d.aprobado_por || usuarioActivo.nombre;
+          d.fecha_aprobacion = d.fecha_aprobacion || new Date().toLocaleString('es-CO');
+          d.estado = 'APROBADO_POR_ABOGADO';
+          d.nivel_alerta = 'OK';
+        }
+      });
+      caso.partes.forEach((p) => {
+        if (p.cedula_cargada) p.aprobado_verificador = true;
+      });
+
       caso.aprobaciones.visto_bueno_juridico_abogado = true;
       caso.aprobaciones.abogado_que_aprobo = usuarioActivo.nombre;
       caso.aprobaciones.fecha_aprobacion_abogado = new Date().toLocaleString('es-CO');
-      caso.aprobaciones.enviado_a_clientes = true;
-      caso.etapa_actual = 'VISTO_BUENO_CLIENTES';
+      // REGLA DURA BPMN: Al dar visto bueno el abogado, NO se marca enviado_a_clientes = true automáticamente; pasa a PENDIENTE_ENVIO_CLIENTES
+      caso.aprobaciones.enviado_a_clientes = false;
+      caso.etapa_actual = 'PENDIENTE_ENVIO_CLIENTES';
       caso.bitacora.push({
         id: 'ev-vb-' + Date.now(),
         fecha: new Date().toLocaleString('es-CO'),
         actor: `${usuarioActivo.nombre} (${usuarioActivo.cargo})`,
-        etapa: 'Aprobación Jurídica del Trámite',
-        detalle: 'Otorgó visto bueno jurídico al trámite y habilitó revisión de los otorgantes.'
+        etapa: '1. Visto Bueno Jurídico del Abogado',
+        detalle: 'Otorgó visto bueno jurídico al trámite. Queda pendiente enviar el borrador por correo electrónico a los clientes.'
       });
       const estadoBpmn = calcularEstadoBpmn(caso);
       caso.mensajes_chat.push({
@@ -2004,13 +2829,83 @@ const server = http.createServer(async (req, res) => {
         emisor: 'ASISTENTE',
         autor: 'Asistente Notarial',
         hora: ahoraHora,
-        texto: `Aprobación jurídica del trámite registrada por ${usuarioActivo.nombre}. El borrador queda habilitado para visto bueno del cliente.`,
-        hallazgos: [`Aprobado por: ${usuarioActivo.nombre} (${usuarioActivo.cargo})`],
+        texto: `✓ Aprobación jurídica del trámite registrada por ${usuarioActivo.nombre}. Antes de poder registrar el Visto Bueno de los Clientes, debemos enviarles el borrador por correo electrónico. Por favor confirma o escribe los correos de cada parte (${caso.partes.map((p) => `${p.nombres_completos}: ${p.correo_electronico || 'Sin correo'}`).join(' · ')}) y pulsa "2. Enviar Borrador por Correo a Clientes":`,
+        hallazgos: [
+          `Aprobado jurídicamente por: ${usuarioActivo.nombre} (${usuarioActivo.cargo})`,
+          `Siguiente paso obligatorio: Enviar borrador a los correos de Vendedores y Compradores.`
+        ],
+        alertas_rojas: [],
+        preguntas_pendientes: [
+          '¿Confirmas el envío del borrador a los correos electrónicos registrados de los otorgantes?'
+        ],
+        acciones_sugeridas: [estadoBpmn.siguiente_accion]
+      });
+    } else if (body.paso === 'ENVIAR_BORRADOR_CLIENTES') {
+      if (!caso.aprobaciones.visto_bueno_juridico_abogado) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: 'REGLA BPMN: No se puede enviar el borrador a los clientes sin que antes exista el Visto Bueno Jurídico del Abogado Verificador.'
+        });
+      }
+      if (Array.isArray(body.correos_partes)) {
+        body.correos_partes.forEach((c) => {
+          const p = caso.partes.find((x) => x.id === c.id || x.id === c.parte_id);
+          if (p && c.correo_electronico) p.correo_electronico = c.correo_electronico.trim();
+        });
+      }
+      const faltanCorreos = caso.partes.filter((p) => !p.correo_electronico || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.correo_electronico));
+      if (faltanCorreos.length > 0) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: `Falta registrar un correo electrónico válido para: ${faltanCorreos.map((p) => p.nombres_completos).join(', ')}.`
+        });
+      }
+
+      caso.aprobaciones.enviado_a_clientes = true;
+      caso.aprobaciones.fecha_envio_clientes = new Date().toLocaleString('es-CO');
+      caso.aprobaciones.correos_notificados = caso.partes.map((p) => `${p.nombres_completos} <${p.correo_electronico}>`);
+      caso.partes.forEach((p) => (p.borrador_enviado = true));
+      caso.etapa_actual = 'BORRADOR_ENVIADO_A_CLIENTES';
+      caso.bitacora.push({
+        id: 'ev-env-' + Date.now(),
+        fecha: new Date().toLocaleString('es-CO'),
+        actor: `${usuarioActivo.nombre} (${usuarioActivo.cargo})`,
+        etapa: '2. Envío de Borrador por Correo a Clientes',
+        detalle: `Se envió el borrador de la escritura a los correos: ${caso.aprobaciones.correos_notificados.join(', ')}.`
+      });
+      const estadoBpmn = calcularEstadoBpmn(caso);
+      caso.mensajes_chat.push({
+        id: 'm-ag-' + Date.now(),
+        emisor: 'ASISTENTE',
+        autor: 'Asistente Notarial',
+        hora: ahoraHora,
+        texto: `✉️ Borrador de la escritura enviado exitosamente a los correos electrónicos de los otorgantes. Ahora queda habilitado el paso "3. Confirmar Visto Bueno de Clientes".`,
+        hallazgos: caso.aprobaciones.correos_notificados.map((c) => `Notificado: ${c}`),
         alertas_rojas: [],
         preguntas_pendientes: [],
         acciones_sugeridas: [estadoBpmn.siguiente_accion]
       });
     } else if (body.paso === 'VISTO_BUENO_CLIENTES') {
+      if (!caso.aprobaciones.visto_bueno_juridico_abogado) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: 'REGLA BPMN: Prohibido registrar Visto Bueno de Clientes sin haber dado primero el Visto Bueno Jurídico del Abogado Verificador.'
+        });
+      }
+      if (!caso.aprobaciones.enviado_a_clientes) {
+        // Si vienen correos en el body o si el cliente aprueba después de que el abogado ya dio visto bueno pero faltaba registrar el disparo de envío, exigir que haya sido enviado primero (o permitir envio_simultaneo explícito solo en tests legacy si ya tiene correos)
+        if (body.permitir_auto_envio_legacy && caso.partes.every((p) => p.correo_electronico)) {
+          caso.aprobaciones.enviado_a_clientes = true;
+          caso.aprobaciones.fecha_envio_clientes = new Date().toLocaleString('es-CO');
+          caso.aprobaciones.correos_notificados = caso.partes.map((p) => `${p.nombres_completos} <${p.correo_electronico}>`);
+        } else {
+          return sendJson(res, 400, {
+            ok: false,
+            error: 'REGLA BPMN: Prohibido dar Visto Bueno de Clientes sin haber enviado primero el borrador a los correos electrónicos de los otorgantes (Paso 2: Enviar Borrador a Clientes).'
+          });
+        }
+      }
+
       caso.aprobaciones.visto_bueno_vendedores = true;
       caso.aprobaciones.visto_bueno_compradores = true;
       caso.partes.forEach((p) => (p.visto_bueno_cliente = true));
@@ -2019,8 +2914,8 @@ const server = http.createServer(async (req, res) => {
         id: 'ev-cli-' + Date.now(),
         fecha: new Date().toLocaleString('es-CO'),
         actor: 'Clientes Otorgantes',
-        etapa: 'Visto Bueno Cliente',
-        detalle: 'Vendedores y Comprador aprobaron el texto de la minuta.'
+        etapa: '3. Visto Bueno de Clientes Otorgantes',
+        detalle: `Vendedores y Comprador aprobaron el borrador enviado a ${caso.aprobaciones.correos_notificados.join(', ')}.`
       });
       const estadoBpmn = calcularEstadoBpmn(caso);
       caso.mensajes_chat.push({
@@ -2028,13 +2923,38 @@ const server = http.createServer(async (req, res) => {
         emisor: 'ASISTENTE',
         autor: 'Asistente Notarial',
         hora: ahoraHora,
-        texto: 'Visto bueno de Vendedores y Comprador registrado. El trámite está listo para impresión en papel de seguridad y cierre.',
-        hallazgos: ['Conformidad de clientes completada al 100%.'],
+        texto: '✓ Visto bueno de Vendedores y Comprador registrado tras la revisión por correo. El trámite está listo para impresión en papel de seguridad y cierre.',
+        hallazgos: ['Conformidad de clientes completada al 100% posterior al envío por correo.'],
         alertas_rojas: [],
         preguntas_pendientes: [],
         acciones_sugeridas: [estadoBpmn.siguiente_accion]
       });
     } else if (body.paso === 'ENVIAR_A_IMPRESION') {
+      if (!estadoPrevio.docs_completos || !estadoPrevio.linderos_listos) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: 'REGLA BPMN: No se puede imprimir ni cerrar la escritura porque faltan documentos o linderos por aprobar.'
+        });
+      }
+      if (!caso.aprobaciones.visto_bueno_juridico_abogado) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: 'REGLA BPMN: No se puede imprimir ni cerrar la escritura sin el Visto Bueno Jurídico del Abogado Verificador.'
+        });
+      }
+      if (!caso.aprobaciones.enviado_a_clientes) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: 'REGLA BPMN: No se puede imprimir ni cerrar la escritura sin haber enviado el borrador por correo a los clientes.'
+        });
+      }
+      if (!caso.aprobaciones.visto_bueno_vendedores || !caso.aprobaciones.visto_bueno_compradores) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: 'REGLA BPMN: No se puede imprimir ni cerrar la escritura sin el Visto Bueno de los Clientes (Vendedores y Compradores).'
+        });
+      }
+
       caso.aprobaciones.en_impresion = true;
       caso.aprobaciones.firma_completada = true;
       if (body.hojas_papel_notarial) caso.aprobaciones.hojas_papel_notarial = body.hojas_papel_notarial;
@@ -2045,7 +2965,7 @@ const server = http.createServer(async (req, res) => {
         id: 'ev-imp-' + Date.now(),
         fecha: new Date().toLocaleString('es-CO'),
         actor: usuarioActivo.nombre,
-        etapa: 'Impresión y Cierre del Trámite',
+        etapa: '4. Impresión en Papel Notarial y Cierre',
         detalle: `Escritura ${caso.aprobaciones.numero_escritura_asignada} impresa en folios ${caso.aprobaciones.hojas_papel_notarial}. Estado del trámite pasa a CERRADO.`
       });
       caso.mensajes_chat.push({
@@ -2053,7 +2973,7 @@ const server = http.createServer(async (req, res) => {
         emisor: 'ASISTENTE',
         autor: 'Asistente Notarial',
         hora: ahoraHora,
-        texto: `Escritura Pública No. ${caso.aprobaciones.numero_escritura_asignada} impresa en folios ${caso.aprobaciones.hojas_papel_notarial}. El trámite ${caso.codigo_tramite} ha pasado a estado CERRADO.`,
+        texto: `✓ Escritura Pública No. ${caso.aprobaciones.numero_escritura_asignada} impresa en folios ${caso.aprobaciones.hojas_papel_notarial}. El trámite ${caso.codigo_tramite} ha pasado a estado CERRADO.`,
         hallazgos: [
           `Código: ${caso.codigo_tramite} -> Estado: CERRADO`,
           `Escritura: ${caso.aprobaciones.numero_escritura_asignada} · Folios: ${caso.aprobaciones.hojas_papel_notarial}`
@@ -2065,6 +2985,8 @@ const server = http.createServer(async (req, res) => {
     } else if (body.paso === 'REABRIR_TRAMITE') {
       caso.estado_apertura = 'ABIERTO';
       caso.etapa_actual = 'REABIERTO_EN_REVISION';
+      caso.aprobaciones.en_impresion = false;
+      caso.aprobaciones.firma_completada = false;
     }
 
     saveStore(store);
@@ -2139,12 +3061,11 @@ const server = http.createServer(async (req, res) => {
           tipo_apto: i % 2 === 0 ? 'TIPO_A' : 'TIPO_B',
           area_m2: i % 2 === 0 ? 84 : 68,
           valor_venta: i % 2 === 0 ? 445000000 : 365000000,
-          estado_dinamico: i === 1 ? 'Firmada' : i === 2 ? 'Documentos pendientes' : 'Sin comprador',
-          tiene_alerta_vencimiento: i === 2,
-          alerta_detalle: i === 2 ? 'Paz y Salvo Admin vence en 5 días (Fin de mes)' : undefined,
-          documentos_recibidos: i === 1 ? 7 : i === 2 ? 3 : 0,
+          estado_dinamico: 'Sin comprador',
+          tiene_alerta_vencimiento: false,
+          documentos_recibidos: 0,
           documentos_totales: 7,
-          minuta_firmada: i === 1
+          minuta_firmada: false
         });
       }
     });
