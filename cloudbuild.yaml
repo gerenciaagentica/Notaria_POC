@@ -1,0 +1,36 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/notaria-repo/notaria-copilot:$_SHORT_SHA'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/notaria-repo/notaria-copilot:latest'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/notaria-repo/notaria-copilot'
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'notaria-copilot'
+      - '--image=us-central1-docker.pkg.dev/$PROJECT_ID/notaria-repo/notaria-copilot:$_SHORT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--port=8080'
+      - '--memory=1Gi'
+      - '--cpu=1'
+      - '--set-env-vars=NODE_ENV=production,GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=us-central1,PRIMARY_VISION_MODEL=gemini-3.8-flash,SECONDARY_VISION_MODEL=gemini-3.1-pro,GCS_BUCKET=notaria-508802-expedientes'
+
+substitutions:
+  _SHORT_SHA: 'v1'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

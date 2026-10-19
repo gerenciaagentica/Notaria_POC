@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Motor Notarial Agéntico · Notaría 33 Bogotá (Gemini 3.8 Flash + PG 18)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+      body { font-family: 'Inter', sans-serif; background-color: #f3f2ee; color: #1c1917; }
+      .serif { font-family: 'Playfair Display', serif; }
+      .mono { font-family: 'JetBrains Mono', monospace; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useEffect } = React;
+
+      function App() {
+        const [vistaActiva, setVistaActiva] = useState('ABOGADO_COPILOTO');
+        const [store, setStore] = useState(null);
+        const [loading, setLoading] = useState(true);
+        const [mensajeInput, setMensajeInput] = useState('');
+        const [fechaPazYSalvo, setFechaPazYSalvo] = useState('2026-11-25');
+        const [subTabDerecha, setSubTabDerecha] = useState('EXPEDIENTE');
+
+        const [nuevaCatNombre, setNuevaCatNombre] = useState('');
+        const [nuevaCatPregunta, setNuevaCatPregunta] = useState('');
+        const [nuevaCatDoc, setNuevaCatDoc] = useState('');
+        const [nuevaCatClausula, setNuevaCatClausula] = useState('');
+
+        const [docNombre, setDocNombre] = useState('');
+        const [docEstilo, setDocEstilo] = useState('VARIABLE');
+        const [docVigencia, setDocVigencia] = useState('FIN_DE_MES_ACTUAL');
+        const [docCampos, setDocCampos] = useState('fecha_expedicion, titular, entidad');
+
+        const [proySeleccionadoIdx, setProySeleccionadoIdx] = useState(0);
+        const [unidadSeleccionada, setUnidadSeleccionada] = useState(null);
+        const [nuevoProyNombre, setNuevoProyNombre] = useState('');
+        const [nuevoProyConstructora, setNuevoProyConstructora] = useState('');
+        const [nuevoProyBloques, setNuevoProyBloques] = useState(3);
+        const [nuevoProyAptos, setNuevoProyAptos] = useState(6);
+        const [mostrarModalProy, setMostrarModalProy] = useState(false);
+
+        const [hojasPapelInput, setHojasPapelInput] = useState('AA-4910201 a AA-4910206');
+        const [escrituraNumInput, setEscrituraNumInput] = useState('3.418 de 2026');
+
+        const cargarEstado = async () => {
+          try {
+            const resp = await fetch('/api/state');
+            const data = await resp.json();
+            setStore(data);
+            if (data.proyectos_constructoras?.[0]?.unidades?.[6] && !unidadSeleccionada) {
+              setUnidadSeleccionada(data.proyectos_constructoras[0].unidades[6]);
+            }
+          } catch (err) {
+            console.error('Error cargando estado:', err);
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        useEffect(() => {
+          cargarEstado();
+        }, []);
+
+        const enviarMensajeAgente = async (opcionesExtra = {}) => {
+          await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mensaje: mensajeInput, ...opcionesExtra })
+          });
+          setMensajeInput('');
+          await cargarEstado();
+        };
+
+        const aprobarLindero = async (linderoId, valor, aprobarTodos) => {
+          await fetch('/api/linderos/aprobar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lindero_id: linderoId, valor_aprobado: valor, aprobar_todos: aprobarTodos })
+          });
+          await cargarEstado();
+        };
+
+        const avanzarFlujo = async (paso) => {
+          await fetch('/api/flujo/avanzar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paso, hojas_papel_notarial: hojasPapelInput, numero_escritura: escrituraNumInput })
+          });
+          await cargarEstado();
+        };
+
+        const guardarNuevaCategoriaNoSQL = async (e) => {
+          e.preventDefault();
+          if (!nuevaCatNombre.trim()) return;
+          await fetch('/api/nosql/categoria', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              categoria_id: nuevaCatNombre.toUpperCase().replace(/\s+/g, '_'),
+              nombre: nuevaCatNombre,
+              pregunta_agente: nuevaCatPregunta || `¿Aplica ${nuevaCatNombre}?`,
+              documentos_adicionales: nuevaCatDoc ? [nuevaCatDoc] : [],
+              clausulas_afectadas: [nuevaCatClausula || 'CLÁUSULA ESPECIAL'],
+              impacto_minuta: `Modifica automáticamente la minuta VENTA PH.docx cuando se activa ${nuevaCatNombre}.`
+            })
+          });
+          setNuevaCatNombre('');
+          setNuevaCatPregunta('');
+          setNuevaCatDoc('');
+          setNuevaCatClausula('');
+          await cargarEstado();
+        };
+
+        const guardarNuevaReglaDocNoSQL = async (e) => {
+          e.preventDefault();
+          if (!docNombre.trim()) return;
+          await fetch('/api/nosql/documento-regla', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              codigo: docNombre.toUpperCase().replace(/\s+/g, '_'),
+              nombre: docNombre,
+              estilo_estructura: docEstilo,
+              regla_vencimiento: docVigencia,
+              campos_extraer: docCampos.split(',').map((s) => s.trim()).filter(Boolean),
+              descripcion_regla: `Documento ${docEstilo} con regla de vigencia ${docVigencia} configurado dinámicamente en la base NoSQL.`
+            })
+          });
+          setDocNombre('');
+          await cargarEstado();
+        };
+
+        const crearProyectoConstructora = async (e) => {
+          e.preventDefault();
+          await fetch('/api/constructoras/crear-proyecto', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              nombre_proyecto: nuevoProyNombre || 'Reserva de los Cerros P.H.',
+              constructora: nuevoProyConstructora || 'Constructora Colpatria S.A.',
+              num_bloques: nuevoProyBloques,
+              aptos_por_bloque: nuevoProyAptos
+            })
+          });
+          setMostrarModalProy(false);
+          setProySeleccionadoIdx(0);
+          await cargarEstado();
+        };
+
+        const cambiarEstadoUnidadConstructora = async (proyectoId, unidadId, nuevoEstado) => {
+          await fetch('/api/constructoras/actualizar-unidad', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ proyecto_id: proyectoId, unidad_id: unidadId, nuevo_estado: nuevoEstado })
+          });
+          await cargarEstado();
+        };
+
+        if (loading || !store) {
+          return (
+            <div className="min-h-screen flex items-center justify-center bg-stone-100">
+              <div className="p-8 bg-white rounded-2xl shadow border text-center">
+                <div className="text-lg font-bold serif">Cargando Motor Notarial Agéntico...</div>
+                <div className="text-xs text-stone-500 mt-1">Gemini 3.8 Flash Vision (Sin OCR) · PostgreSQL 18 · NoSQL Dinámico</div>
+              </div>
+            </div>
+          );
+        }
+
+        const caso = store.casos[0];
+        const catalogo = store.catalogo_tramites[0];
+        const proyectoActual = store.proyectos_constructoras[proySeleccionadoIdx] || store.proyectos_constructoras[0];
+        const liq = store.liquidacion_actual;
+        const dudasPendientesCount = caso.discrepancias_linderos.filter((d) => d.estado === 'PENDIENTE_HUMANO').length;
+
+        return (
+          <div className="min-h-screen flex flex-col">
+            <header className="sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-stone-300 px-6 py-3 flex flex-wrap items-center justify-between gap-3 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-purple-950 text-white flex items-center justify-center font-bold text-lg shadow-sm">+</div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="serif font-bold text-lg text-stone-900">Notaría 33 del Círculo de Bogotá D.C.</span>
+                    <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-900 font-bold border border-purple-300">
+                      Gemini 3.8 Flash Vision (Sin OCR) · PostgreSQL 18
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-500">
+                    Copiloto Conversacional Zero-Form · Cruce Tradición/Cédulas · Consenso Doble IA en Linderos · Constructoras Dinámicas NoSQL
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 bg-stone-200/80 p-1 rounded-xl text-xs font-semibold">
+                <button onClick={() => setVistaActiva('ABOGADO_COPILOTO')} className={`px-3 py-2 rounded-lg transition ${vistaActiva === 'ABOGADO_COPILOTO' ? 'bg-purple-900 text-white shadow-sm' : 'text-stone-700 hover:bg-stone-300'}`}>
+                  1. 💬 Chat Agéntico + Expediente
+                </button>
+                <button onClick={() => setVistaActiva('VERIFICADOR_LINDEROS')} className={`px-3 py-2 rounded-lg transition flex items-center gap-1.5 ${vistaActiva === 'VERIFICADOR_LINDEROS' ? 'bg-purple-900 text-white shadow-sm' : 'text-stone-700 hover:bg-stone-300'}`}>
+                  <span>2. 🔍 Linderos Doble IA</span>
+                  {dudasPendientesCount > 0 && <span className="px-1.5 py-0.2 bg-amber-400 text-stone-950 rounded-full text-[10px] font-extrabold">{dudasPendientesCount}</span>}
+                </button>
+                <button onClick={() => setVistaActiva('ADMIN_NOSQL')} className={`px-3 py-2 rounded-lg transition ${vistaActiva === 'ADMIN_NOSQL' ? 'bg-purple-900 text-white shadow-sm' : 'text-stone-700 hover:bg-stone-300'}`}>
+                  3. ⚙️ Base Dinámica NoSQL (Trámites/Vigencias)
+                </button>
+                <button onClick={() => setVistaActiva('CONSTRUCTORA')} className={`px-3 py-2 rounded-lg transition ${vistaActiva === 'CONSTRUCTORA' ? 'bg-purple-900 text-white shadow-sm' : 'text-stone-700 hover:bg-stone-300'}`}>
+                  4. 🏢 Constructoras (Bloques/Estados)
+                </button>
+                <button onClick={() => setVistaActiva('CLIENTE_CELULAR')} className={`px-3 py-2 rounded-lg transition ${vistaActiva === 'CLIENTE_CELULAR' ? 'bg-purple-900 text-white shadow-sm' : 'text-stone-700 hover:bg-stone-300'}`}>
+                  5. 📱 Vista Cliente / Visto Bueno
+                </button>
+                <button onClick={() => setVistaActiva('JEFE_REPARTO')} className={`px-3 py-2 rounded-lg transition ${vistaActiva === 'JEFE_REPARTO' ? 'bg-purple-900 text-white shadow-sm' : 'text-stone-700 hover:bg-stone-300'}`}>
+                  6. 📊 Tablero Jefe
+                </button>
+              </div>
+            </header>
+
+            <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 py-6">
+              {vistaActiva === 'ABOGADO_COPILOTO' && (
+                <div className="space-y-4">
+                  <div className="bg-white rounded-2xl border border-stone-300 p-4 shadow-sm flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-bold text-lg text-stone-900">{caso.radicado}</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-900">{caso.etapa_actual}</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-900">
+                          ⏰ Paz y Salvo Admin: Vence en {caso.documentos[0]?.dias_restantes ?? 5} días (Fin de mes)
+                        </span>
+                      </div>
+                      <p className="text-xs text-stone-600 mt-1">
+                        <strong>Inmueble:</strong> {caso.inmueble.direccion} · <strong>Matrícula:</strong> {caso.inmueble.matricula_inmobiliaria} · <strong>CHIP:</strong> {caso.inmueble.chip} · <strong>Precio:</strong> ${Number(caso.negocio.valor_venta || 0).toLocaleString('es-CO')}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <button onClick={() => setVistaActiva('VERIFICADOR_LINDEROS')} className="px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold shadow-sm">
+                        🔍 Revisar Linderos ({dudasPendientesCount} dudas)
+                      </button>
+                      <button onClick={() => avanzarFlujo('VISTO_BUENO_ABOGADO')} className={`px-3 py-2 rounded-lg font-bold border ${caso.aprobaciones.visto_bueno_juridico_abogado ? 'bg-emerald-100 text-emerald-900 border-emerald-300' : 'bg-stone-900 text-white border-stone-900'}`}>
+                        {caso.aprobaciones.visto_bueno_juridico_abogado ? '✓ Visto Bueno Abogado OK' : '1. Dar Visto Bueno Abogado'}
+                      </button>
+                      <button onClick={() => avanzarFlujo('VISTO_BUENO_CLIENTES')} className={`px-3 py-2 rounded-lg font-bold border ${caso.aprobaciones.visto_bueno_vendedores ? 'bg-emerald-100 text-emerald-900 border-emerald-300' : 'bg-indigo-900 text-white border-indigo-900'}`}>
+                        {caso.aprobaciones.visto_bueno_vendedores ? '✓ Visto Bueno Clientes OK' : '2. Simular Visto Bueno Clientes'}
+                      </button>
+                      <button onClick={() => avanzarFlujo('ENVIAR_A_IMPRESION')} className={`px-3 py-2 rounded-lg font-bold border ${caso.aprobaciones.en_impresion ? 'bg-purple-100 text-purple-900 border-purple-300' : 'bg-purple-900 text-white border-purple-900'}`}>
+                        {caso.aprobaciones.en_impresion ? '🖨️ En Impresión (Papel Asignado)' : '3. Pasar a Impresión'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                    <div className="lg:col-span-5 bg-white rounded-2xl border border-stone-300 shadow-sm flex flex-col h-[700px] overflow-hidden">
+                      <div className="p-4 bg-stone-900 text-white flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] uppercase tracking-wider text-amber-400 font-bold">Zero-Form Notary Copilot</span>
+                          <h3 className="text-sm font-bold">Agente Recepcionista · Gemini 3.8 Flash Vision</h3>
+                        </div>
+                        <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-900 text-emerald-200 border border-emerald-700">Visión Pura · Cero OCR</span>
+                      </div>
+
+                      <div className="px-4 py-2.5 bg-purple-50 border-b border-purple-200 text-[11px] space-y-2">
+                        <div className="font-bold text-purple-950">⚡ Acciones Rápidas de Simulación del Caso:</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button onClick={() => enviarMensajeAgente({ subir_cedula_monica: true, mensaje: 'Adjunto la cédula faltante de la vendedora Mónica Patricia Pérez (CC 52.110.900).' })} className="px-2.5 py-1 rounded bg-purple-900 text-white font-semibold hover:bg-purple-800">
+                            + Subir Cédula Faltante (Mónica Pérez)
+                          </button>
+                          <button onClick={() => enviarMensajeAgente({ activar_hipoteca: !caso.tiene_prenda_hipoteca, mensaje: caso.tiene_prenda_hipoteca ? 'Cambiar trámite a venta de contado sin hipoteca.' : 'El apartamento viene con prenda / crédito hipotecario Davivienda.' })} className="px-2.5 py-1 rounded bg-white border border-purple-300 text-purple-900 font-semibold hover:bg-purple-100">
+                            {caso.tiene_prenda_hipoteca ? 'Quitar Categoría Prenda/Hipoteca' : 'Activar Categoría Con Prenda/Hipoteca'}
+                          </button>
+                          <button onClick={() => enviarMensajeAgente({ tiene_admin: !caso.tiene_administracion, mensaje: caso.tiene_administracion ? 'Es una casa sin administración.' : 'Es un apartamento con administración PH.' })} className="px-2.5 py-1 rounded bg-white border border-purple-300 text-purple-900 font-semibold hover:bg-purple-100">
+                            {caso.tiene_administracion ? 'Cambiar a Sin Administración' : 'Activar Con Administración (Paz y Salvo)'}
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-1 border-t border-purple-200/70">
+                          <span className="font-semibold text-stone-700">Probar Fecha Paz y Salvo Admin:</span>
+                          <input type="date" value={fechaPazYSalvo} onChange={(e) => setFechaPazYSalvo(e.target.value)} className="border border-stone-300 rounded px-2 py-0.5 text-xs bg-white" />
+                          <button onClick={() => enviarMensajeAgente({ fecha_paz_y_salvo: fechaPazYSalvo, mensaje: `Capturé nuevo Paz y Salvo de Administración con fecha ${fechaPazYSalvo}.` })} className="px-2.5 py-0.5 rounded bg-amber-600 text-white font-bold hover:bg-amber-700">
+                            Evaluar Vencimiento
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-stone-50 text-xs">
+                        {caso.mensajes_chat.map((m) => (
+                          <div key={m.id} className={`flex ${m.emisor === 'ABOGADO' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`rounded-2xl px-4 py-3 max-w-[92%] shadow-sm space-y-2 ${m.emisor === 'ABOGADO' ? 'bg-purple-900 text-white rounded-tr-none' : 'bg-white border border-stone-200 text-stone-800 rounded-tl-none'}`}>
+                              <div className="flex items-center justify-between gap-3 border-b border-current/10 pb-1">
+                                <span className="font-bold text-[11px]">{m.autor}</span>
+                                <span className="text-[10px] opacity-70">{m.hora}</span>
+                              </div>
+                              <p className="leading-relaxed">{m.texto}</p>
+                              {m.hallazgos?.length > 0 && (
+                                <div className="p-2.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-950 space-y-1">
+                                  <div className="font-bold text-[11px]">🧠 Inferencia y Cruce Documental:</div>
+                                  {m.hallazgos.map((h, i) => <p key={i} className="text-[11px] leading-snug">• {h}</p>)}
+                                </div>
+                              )}
+                              {m.alertas_rojas?.length > 0 && (
+                                <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-950 space-y-1">
+                                  <div className="font-bold text-[11px]">🚨 Pendientes y Alertas de Vencimiento:</div>
+                                  {m.alertas_rojas.map((a, i) => <p key={i} className="text-[11px] leading-snug font-medium">• {a}</p>)}
+                                </div>
+                              )}
+                              {m.preguntas_pendientes?.length > 0 && (
+                                <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-950 space-y-1">
+                                  <div className="font-bold text-[11px]">❓ Preguntas del Agente al Abogado:</div>
+                                  {m.preguntas_pendientes.map((q, i) => <p key={i} className="text-[11px] leading-snug">• {q}</p>)}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <form onSubmit={(e) => { e.preventDefault(); if (mensajeInput.trim()) enviarMensajeAgente(); }} className="p-3 bg-white border-t border-stone-200 flex gap-2">
+                        <input type="text" value={mensajeInput} onChange={(e) => setMensajeInput(e.target.value)} placeholder="Escribe al agente (ej. 'Subir cédula de Mónica')..." className="flex-1 border border-stone-300 rounded-xl px-3 py-2 text-xs" />
+                        <button type="submit" className="px-4 py-2 bg-purple-900 hover:bg-purple-800 text-white font-bold text-xs rounded-xl">Enviar</button>
+                      </form>
+                    </div>
+
+                    <div className="lg:col-span-7 bg-white rounded-2xl border border-stone-300 shadow-sm flex flex-col h-[700px] overflow-hidden">
+                      <div className="px-5 pt-3 bg-stone-100 border-b border-stone-200 flex flex-wrap gap-1 text-xs font-bold">
+                        <button onClick={() => setSubTabDerecha('EXPEDIENTE')} className={`px-3.5 py-2 rounded-t-lg border-b-2 ${subTabDerecha === 'EXPEDIENTE' ? 'bg-white text-purple-900 border-purple-900' : 'text-stone-600 border-transparent'}`}>
+                          📑 Partes Inferidas, Documentos e Impresión
+                        </button>
+                        <button onClick={() => setSubTabDerecha('MINUTA_VIVO')} className={`px-3.5 py-2 rounded-t-lg border-b-2 ${subTabDerecha === 'MINUTA_VIVO' ? 'bg-white text-purple-900 border-purple-900' : 'text-stone-600 border-transparent'}`}>
+                          📜 Minuta VENTA PH.docx en Vivo
+                        </button>
+                        <button onClick={() => setSubTabDerecha('LIQUIDACION')} className={`px-3.5 py-2 rounded-t-lg border-b-2 ${subTabDerecha === 'LIQUIDACION' ? 'bg-white text-purple-900 border-purple-900' : 'text-stone-600 border-transparent'}`}>
+                          🧮 Liquidación Res. 964/2026
+                        </button>
+                      </div>
+
+                      {subTabDerecha === 'EXPEDIENTE' && (
+                        <div className="flex-1 p-5 overflow-y-auto space-y-5 text-xs">
+                          <div className="p-3.5 rounded-xl bg-purple-50 border border-purple-200 space-y-2">
+                            <div className="font-bold text-purple-950">Categorías Activas del Trámite (Alimentadas desde NoSQL):</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {caso.categorias_activas.map((cat) => (
+                                <span key={cat} className="px-2.5 py-1 rounded-full bg-white border border-purple-300 text-purple-900 font-bold text-[11px]">✓ {cat}</span>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <h4 className="font-bold text-stone-900 text-sm">1. Inferencia Vendedores vs. Compradores (Tradición vs. Cédulas)</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                              {caso.partes.map((p) => (
+                                <div key={p.id} className={`p-3 rounded-xl border ${p.cedula_cargada ? 'bg-white border-stone-200' : 'bg-red-50 border-red-300'} space-y-1`}>
+                                  <div className="flex items-center justify-between">
+                                    <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${p.rol === 'VENDEDOR' ? 'bg-indigo-100 text-indigo-900' : 'bg-teal-100 text-teal-900'}`}>{p.rol} ({p.porcentaje}%)</span>
+                                    <span className={`font-bold text-[10px] ${p.cedula_cargada ? 'text-emerald-700' : 'text-red-700'}`}>{p.cedula_cargada ? '✓ Cédula OK' : '❌ FALTA CÉDULA'}</span>
+                                  </div>
+                                  <div className="font-bold text-stone-900">{p.nombres_completos}</div>
+                                  <div className="mono text-[11px] text-stone-600">C.C. {p.numero_documento} ({p.lugar_expedicion})</div>
+                                  <p className="text-[10px] text-stone-500 leading-snug">{p.origen_inferencia}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <h4 className="font-bold text-stone-900 text-sm">2. Documentos del Trámite y Alertas de Vencimiento</h4>
+                            <div className="space-y-2">
+                              {caso.documentos.map((doc) => (
+                                <div key={doc.id} className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${doc.nivel_alerta === 'CRITICAL' ? 'bg-red-50/70 border-red-300' : doc.nivel_alerta === 'WARNING' ? 'bg-amber-50/70 border-amber-300' : 'bg-white border-stone-200'}`}>
+                                  <div className="space-y-0.5">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-bold text-stone-900">{doc.nombre}</span>
+                                      <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-stone-200 text-stone-700">ESTILO: {doc.estilo}</span>
+                                    </div>
+                                    <p className={`text-[11px] font-medium ${doc.nivel_alerta === 'CRITICAL' ? 'text-red-800' : 'text-stone-600'}`}>{doc.mensaje_alerta}</p>
+                                  </div>
+                                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-stone-200 text-stone-900 shrink-0">{doc.estado}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="p-4 rounded-xl border-2 border-stone-300 bg-stone-50 space-y-3">
+                            <h4 className="font-bold text-stone-900 text-sm">3. Seguimiento de Visto Bueno (Abogado y Clientes) e Impresión</h4>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div>
+                                <label className="text-[10px] font-semibold text-stone-600 block">Folios Papel Notarial:</label>
+                                <input type="text" value={hojasPapelInput} onChange={(e) => setHojasPapelInput(e.target.value)} className="w-full border border-stone-300 rounded px-2 py-1 mono text-xs bg-white" />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-semibold text-stone-600 block">Número Escritura:</label>
+                                <input type="text" value={escrituraNumInput} onChange={(e) => setEscrituraNumInput(e.target.value)} className="w-full border border-stone-300 rounded px-2 py-1 mono text-xs bg-white" />
+                              </div>
+                              <div className="flex items-end">
+                                <button onClick={() => avanzarFlujo('COMPLETAR_FIRMA')} className="w-full py-1.5 px-3 bg-emerald-700 text-white font-bold rounded text-xs">
+                                  ✓ Registrar Impresión y Firma
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {subTabDerecha === 'MINUTA_VIVO' && (
+                        <div className="flex-1 p-5 overflow-y-auto bg-stone-100">
+                          <div className="bg-white border-2 border-stone-300 rounded-xl p-6 shadow-sm">
+                            <pre className="mono text-[11px] whitespace-pre-wrap leading-relaxed text-stone-800">{store.minuta_generada_actual}</pre>
+                          </div>
+                        </div>
+                      )}
+
+                      {subTabDerecha === 'LIQUIDACION' && liq && (
+                        <div className="flex-1 p-5 overflow-y-auto space-y-4 text-xs">
+                          <div className="p-4 rounded-xl bg-stone-50 border border-stone-200">
+                            <div className="text-stone-500">Base de Liquidación:</div>
+                            <div className="text-xl font-bold text-stone-900 mono">${Number(liq.base_liquidacion || 0).toLocaleString('es-CO')}</div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="p-4 rounded-xl bg-indigo-50 border border-indigo-200">
+                              <div className="font-bold text-indigo-900">Total Vendedor (50% + Retefuente 1%)</div>
+                              <div className="text-lg font-bold mono text-indigo-950 mt-1">${Number(liq.total_vendedor || 0).toLocaleString('es-CO')}</div>
+                            </div>
+                            <div className="p-4 rounded-xl bg-teal-50 border border-teal-200">
+                              <div className="font-bold text-teal-900">Total Comprador (50% + Registro)</div>
+                              <div className="text-lg font-bold mono text-teal-950 mt-1">${Number(liq.total_comprador || 0).toLocaleString('es-CO')}</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {vistaActiva === 'VERIFICADOR_LINDEROS' && (
+                <div className="bg-white rounded-2xl border border-stone-300 shadow-md overflow-hidden">
+                  <div className="bg-stone-900 text-white px-6 py-4 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <span className="text-[11px] uppercase tracking-wider text-amber-400 font-bold">Consenso Multimodal Sin OCR · Escrituras con Sellos</span>
+                      <h2 className="text-lg font-bold">Verificación Minuciosa de Linderos (Gemini 3.8 Flash Vision vs. Modelo 2 Contraste)</h2>
+                    </div>
+                    <button onClick={() => aprobarLindero(undefined, undefined, true)} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">
+                      ✓ Confirmar Todos los Linderos y Actualizar Minuta
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-stone-200">
+                    <div className="p-6 bg-stone-100 space-y-4">
+                      <div className="text-xs font-bold text-stone-800">📷 Imagen Escaneada Original: escritura_1420_2014_escaneo_sellos.pdf</div>
+                      <div className="bg-[#f7f2e4] border-2 border-stone-400 rounded-xl p-6 shadow-inner mono text-xs leading-relaxed text-stone-800 space-y-3">
+                        <p>
+                          <strong>APARTAMENTO SEISCIENTOS UNO (601):</strong> ... Tiene un área privada de{' '}
+                          <span className="bg-amber-300 border-2 border-amber-700 px-1.5 py-0.5 font-extrabold rounded">
+                            OCHENTA Y OCHO PUNTO CINCUENTA Y [SELLO AZUL: 88.53 / 88.58]
+                          </span>{' '}
+                          METROS CUADRADOS...
+                        </p>
+                        <p><strong>POR EL NORTE:</strong> En línea quebrada de <span className="bg-emerald-200 px-1 rounded">ocho metros cuarenta y cinco centímetros (8.45 mts)</span>.</p>
+                        <p><strong>POR EL SUR:</strong> En extensión de <span className="bg-emerald-200 px-1 rounded">seis metros veinte centímetros (6.20 mts)</span>.</p>
+                        <p>
+                          <strong>POR EL ORIENTE:</strong> En extensión de{' '}
+                          <span className="bg-red-300 border-2 border-red-700 px-1.5 py-0.5 font-extrabold rounded">
+                            NUEVE METROS [MANCHA: TREINTA / OCHENTA] CENTÍMETROS (9.30 / 9.80 mts)
+                          </span>{' '}
+                          con muro común que lo separa del apartamento 602.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="p-6 space-y-5">
+                      {caso.discrepancias_linderos.map((d, index) => (
+                        <div key={d.id} className={`p-4 rounded-xl border-2 space-y-3 text-xs ${d.estado === 'APROBADO_ABOGADO' ? 'border-emerald-400 bg-emerald-50/40' : 'border-amber-400 bg-amber-50/40'}`}>
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-sm text-stone-900">Duda #{index + 1}: {d.campo}</span>
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-300 text-stone-950">{d.estado}</span>
+                          </div>
+                          <p className="text-stone-700">{d.motivo_duda}</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div onClick={() => aprobarLindero(d.id, d.lectura_modelo_a)} className="cursor-pointer p-3 rounded-xl border-2 border-purple-800 bg-purple-50 space-y-1">
+                              <div className="font-bold text-purple-950">🧠 Modelo 1: Gemini 3.8 Flash ({d.confianza_a}%)</div>
+                              <div className="mono font-bold text-stone-900">{d.lectura_modelo_a}</div>
+                              <p className="text-[11px] text-purple-900">{d.argumento_a}</p>
+                            </div>
+                            <div onClick={() => aprobarLindero(d.id, d.lectura_modelo_b)} className="cursor-pointer p-3 rounded-xl border border-stone-300 bg-white space-y-1">
+                              <div className="font-bold text-stone-800">👁️ Modelo 2: Contraste ({d.confianza_b}%)</div>
+                              <div className="mono font-bold text-stone-900">{d.lectura_modelo_b}</div>
+                              <p className="text-[11px] text-stone-600">{d.argumento_b}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {vistaActiva === 'ADMIN_NOSQL' && (
+                <div className="bg-white rounded-2xl border border-stone-300 p-6 shadow-sm grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs">
+                  <div className="space-y-4">
+                    <h3 className="font-bold text-base text-stone-900">1. Categorías Dinámicas del Trámite ({catalogo.categorias.length})</h3>
+                    {catalogo.categorias.map((c) => (
+                      <div key={c.categoria_id} className="p-3.5 rounded-xl border border-stone-200 bg-stone-50 space-y-1">
+                        <div className="font-bold text-purple-950">{c.nombre}</div>
+                        <p className="text-stone-600">{c.impacto_minuta}</p>
+                      </div>
+                    ))}
+                    <form onSubmit={guardarNuevaCategoriaNoSQL} className="p-4 rounded-xl border-2 border-purple-200 bg-purple-50/50 space-y-2.5">
+                      <div className="font-bold text-purple-950">+ Crear Nueva Categoría en Base NoSQL</div>
+                      <input type="text" placeholder="Nombre de la Categoría" value={nuevaCatNombre} onChange={(e) => setNuevaCatNombre(e.target.value)} className="w-full border rounded-lg px-3 py-2 bg-white" />
+                      <input type="text" placeholder="Pregunta que hace el Agente" value={nuevaCatPregunta} onChange={(e) => setNuevaCatPregunta(e.target.value)} className="w-full border rounded-lg px-3 py-2 bg-white" />
+                      <input type="text" placeholder="Cláusula que modifica en la Minuta" value={nuevaCatClausula} onChange={(e) => setNuevaCatClausula(e.target.value)} className="w-full border rounded-lg px-3 py-2 bg-white" />
+                      <button type="submit" className="px-4 py-2 bg-purple-900 text-white font-bold rounded-lg">Guardar Categoría en NoSQL</button>
+                    </form>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="font-bold text-base text-stone-900">2. Reglas de Documentos, Vencimientos y Extracción ({catalogo.documentos_reglas.length})</h3>
+                    {catalogo.documentos_reglas.map((d) => (
+                      <div key={d.codigo} className="p-3.5 rounded-xl border border-stone-200 bg-stone-50 space-y-1">
+                        <div className="flex justify-between font-bold text-stone-900">
+                          <span>{d.nombre}</span>
+                          <span className="text-purple-900">{d.estilo_estructura} · {d.regla_vencimiento}</span>
+                        </div>
+                        <p className="text-stone-600">{d.descripcion_regla}</p>
+                      </div>
+                    ))}
+                    <form onSubmit={guardarNuevaReglaDocNoSQL} className="p-4 rounded-xl border-2 border-teal-200 bg-teal-50/50 space-y-2.5">
+                      <div className="font-bold text-teal-950">+ Crear Nueva Regla de Documento y Vencimiento</div>
+                      <input type="text" placeholder="Nombre del Documento" value={docNombre} onChange={(e) => setDocNombre(e.target.value)} className="w-full border rounded-lg px-3 py-2 bg-white" />
+                      <div className="grid grid-cols-2 gap-2">
+                        <select value={docEstilo} onChange={(e) => setDocEstilo(e.target.value)} className="border rounded-lg px-2 py-2 bg-white font-semibold">
+                          <option value="FIJO">ESTILO FIJO</option>
+                          <option value="VARIABLE">ESTILO VARIABLE</option>
+                        </select>
+                        <select value={docVigencia} onChange={(e) => setDocVigencia(e.target.value)} className="border rounded-lg px-2 py-2 bg-white font-semibold">
+                          <option value="FIN_DE_MES_ACTUAL">Vence Fin de Mes (Alerta &le; 5d)</option>
+                          <option value="MAX_90_DIAS">Menor a 3 meses (90 días)</option>
+                          <option value="SIN_VENCIMIENTO">Sin vencimiento</option>
+                        </select>
+                      </div>
+                      <input type="text" placeholder="Campos a extraer separados por coma" value={docCampos} onChange={(e) => setDocCampos(e.target.value)} className="w-full border rounded-lg px-3 py-2 bg-white mono" />
+                      <button type="submit" className="px-4 py-2 bg-teal-900 text-white font-bold rounded-lg">Guardar Regla en NoSQL</button>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {vistaActiva === 'CONSTRUCTORA' && proyectoActual && (
+                <div className="space-y-5">
+                  <div className="bg-white rounded-2xl border border-stone-300 p-5 shadow-sm flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <h2 className="text-2xl font-bold serif text-stone-900">{proyectoActual.nombre_proyecto}</h2>
+                      <p className="text-xs text-stone-600">{proyectoActual.constructora} · {proyectoActual.bloques_configurados.length} bloques · {proyectoActual.unidades.length} apartamentos</p>
+                    </div>
+                    <button onClick={() => setMostrarModalProy(!mostrarModalProy)} className="px-4 py-2 rounded-xl bg-purple-900 text-white text-xs font-bold">
+                      + Crear Proyecto Dinámico de Constructora
+                    </button>
+                  </div>
+
+                  {mostrarModalProy && (
+                    <form onSubmit={crearProyectoConstructora} className="bg-purple-50 border-2 border-purple-300 rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-5 gap-3 text-xs">
+                      <input type="text" required placeholder="Nombre del Proyecto" value={nuevoProyNombre} onChange={(e) => setNuevoProyNombre(e.target.value)} className="border rounded-lg px-3 py-2 bg-white" />
+                      <input type="text" required placeholder="Nombre Constructora" value={nuevoProyConstructora} onChange={(e) => setNuevoProyConstructora(e.target.value)} className="border rounded-lg px-3 py-2 bg-white" />
+                      <input type="number" min={1} max={6} value={nuevoProyBloques} onChange={(e) => setNuevoProyBloques(Number(e.target.value))} className="border rounded-lg px-3 py-2 bg-white font-bold" />
+                      <input type="number" min={2} max={12} value={nuevoProyAptos} onChange={(e) => setNuevoProyAptos(Number(e.target.value))} className="border rounded-lg px-3 py-2 bg-white font-bold" />
+                      <button type="submit" className="bg-purple-900 text-white font-bold rounded-lg px-4 py-2">Generar Bloques</button>
+                    </form>
+                  )}
+
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <div className="lg:col-span-7 bg-white rounded-2xl border border-stone-300 p-5 shadow-sm">
+                      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${proyectoActual.bloques_configurados.length}, minmax(0, 1fr))` }}>
+                        {proyectoActual.bloques_configurados.map((bloque) => (
+                          <div key={bloque} className="space-y-2">
+                            <div className="text-center font-bold text-xs py-1 bg-stone-100 rounded-lg">{bloque}</div>
+                            {proyectoActual.unidades.filter((u) => u.bloque === bloque).map((u) => (
+                              <button key={u.unidad_id} onClick={() => setUnidadSeleccionada(u)} className={`w-full p-2.5 rounded-xl border-2 text-center text-xs ${u.minuta_firmada ? 'bg-emerald-800 text-white border-emerald-900' : u.tiene_alerta_vencimiento ? 'bg-amber-100 border-amber-400 text-amber-950' : 'bg-stone-100 border-stone-300'}`}>
+                                <div className="font-bold">{u.apartamento}</div>
+                                <div className="text-[10px]">{u.estado_dinamico}</div>
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="lg:col-span-5 bg-white rounded-2xl border border-stone-300 p-5 shadow-sm space-y-4 text-xs">
+                      {unidadSeleccionada && (
+                        <>
+                          <h3 className="text-lg font-bold serif text-stone-900">Unidad {unidadSeleccionada.unidad_id}</h3>
+                          <p><strong>Comprador:</strong> {unidadSeleccionada.comprador_nombre || 'Sin asignar'}</p>
+                          <div>
+                            <label className="block font-bold mb-1">Cambiar Estado Dinámico:</label>
+                            <select value={unidadSeleccionada.estado_dinamico} onChange={(e) => { const nuevo = e.target.value; setUnidadSeleccionada({ ...unidadSeleccionada, estado_dinamico: nuevo }); cambiarEstadoUnidadConstructora(proyectoActual.proyecto_id, unidadSeleccionada.unidad_id, nuevo); }} className="w-full border rounded-lg px-3 py-2 font-bold">
+                              {proyectoActual.estados_personalizados.map((est) => <option key={est} value={est}>{est}</option>)}
+                            </select>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {vistaActiva === 'CLIENTE_CELULAR' && (
+                <div className="flex justify-center py-4">
+                  <div className="w-[380px] bg-stone-950 rounded-[38px] p-3.5 shadow-xl">
+                    <div className="bg-white rounded-[28px] p-5 space-y-4 text-xs">
+                      <h3 className="font-bold text-base serif">{caso.radicado} · Vista Móvil Cliente</h3>
+                      <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-900">
+                        🚨 Paz y Salvo Administración vence a fin de mes (quedan 5 días).
+                      </div>
+                      <button onClick={() => avanzarFlujo('VISTO_BUENO_CLIENTES')} className="w-full py-2.5 rounded-xl bg-emerald-700 text-white font-bold">
+                        ✓ Dar Visto Bueno Digital al Borrador de la Minuta
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {vistaActiva === 'JEFE_REPARTO' && (
+                <div className="bg-white rounded-2xl border border-stone-300 p-6 shadow-sm text-xs space-y-3">
+                  <h3 className="text-lg font-bold serif">Tablero de Control del Jefe Notarial</h3>
+                  <p>Caso activo: <strong>{caso.radicado}</strong> · Etapa: <strong>{caso.etapa_actual}</strong> · Abogado: <strong>{caso.abogado_asignado}</strong></p>
+                </div>
+              )}
+            </main>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+  </body>
+</html>
